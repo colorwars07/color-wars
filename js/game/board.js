@@ -1,24 +1,40 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/game/board.js
- * Arena visual del juego
+ * Arena visual del juego - BLINDADO
  * ═══════════════════════════════════════════════════════
  */
 import { registerView, showToast } from '../core/app.js';
-import { getGame, setView, GAME_CFG } from '../core/state.js';
+import { getGame, setView } from '../core/state.js'; // Quitamos dependencias peligrosas
 import { playerClick, startEngine, stopEngine, getCellCounts } from './engine.js';
+
+const BOARD_SIZE = 5;
 
 registerView('game', initGameView);
 
 export async function initGameView($container) {
-  const game = getGame();
-  if (!game) { setView('dashboard'); return; }
+  try {
+    const game = getGame();
+    if (!game) { setView('dashboard'); return; }
 
-  renderBoard($container, game);
-  startEngine(
-    () => updateBoardDOM($container),
-    (winner) => showResult($container, winner)
-  );
+    // FAILSAFE: Si el tablero viene corrupto o vacío, lo creamos de emergencia
+    if (!game.board || game.board.length === 0) {
+        game.board = Array(BOARD_SIZE).fill(null).map(() => 
+            Array(BOARD_SIZE).fill(null).map(() => ({ owner: null, mass: 0, blocked: false }))
+        );
+    }
+
+    renderBoard($container, game);
+    startEngine(
+      () => updateBoardDOM($container),
+      (winner) => showResult($container, winner)
+    );
+    
+  } catch (error) {
+    console.error("Error fatal en la arena:", error);
+    showToast('Error cargando la arena. El saldo ha sido devuelto.', 'error');
+    setView('dashboard');
+  }
 }
 
 function renderBoard($c, game) {
@@ -50,7 +66,7 @@ function renderBoard($c, game) {
   $c.querySelector('#btn-surrender').addEventListener('click', () => {
      stopEngine();
      setView('dashboard');
-     showToast('Te has rendido. Cobarde.', 'warning');
+     showToast('Te has rendido.', 'warning');
   });
 
   updateBoardDOM($c);
@@ -58,12 +74,14 @@ function renderBoard($c, game) {
 
 function updateBoardDOM($c) {
   const game = getGame();
-  if (!game) return;
+  if (!game || !game.board) return;
 
   const cells = $c.querySelectorAll('.cell');
+  if (!cells.length) return;
+
   let idx = 0;
-  for (let r = 0; r < GAME_CFG.BOARD_SIZE; r++) {
-    for (let c = 0; c < GAME_CFG.BOARD_SIZE; c++) {
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
       const stateCell = game.board[r][c];
       const domCell = cells[idx++];
 
