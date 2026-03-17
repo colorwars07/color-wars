@@ -1,40 +1,28 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/game/board.js
- * Arena visual del juego - BLINDADO
  * ═══════════════════════════════════════════════════════
  */
 import { registerView, showToast } from '../core/app.js';
-import { getGame, setView } from '../core/state.js'; // Quitamos dependencias peligrosas
+import { setView } from '../core/state.js';
 import { playerClick, startEngine, stopEngine, getCellCounts } from './engine.js';
 
 const BOARD_SIZE = 5;
-
 registerView('game', initGameView);
 
 export async function initGameView($container) {
-  try {
-    const game = getGame();
-    if (!game) { setView('dashboard'); return; }
-
-    // FAILSAFE: Si el tablero viene corrupto o vacío, lo creamos de emergencia
-    if (!game.board || game.board.length === 0) {
-        game.board = Array(BOARD_SIZE).fill(null).map(() => 
-            Array(BOARD_SIZE).fill(null).map(() => ({ owner: null, mass: 0, blocked: false }))
-        );
-    }
-
-    renderBoard($container, game);
-    startEngine(
-      () => updateBoardDOM($container),
-      (winner) => showResult($container, winner)
-    );
-    
-  } catch (error) {
-    console.error("Error fatal en la arena:", error);
-    showToast('Error cargando la arena. El saldo ha sido devuelto.', 'error');
-    setView('dashboard');
+  const game = window.CW_SESSION;
+  if (!game || !game.board) { 
+    showToast('Error cargando la arena', 'error');
+    setView('dashboard'); 
+    return; 
   }
+
+  renderBoard($container, game);
+  startEngine(
+    () => updateBoardDOM($container),
+    (winner) => showResult($container, winner)
+  );
 }
 
 function renderBoard($c, game) {
@@ -48,9 +36,7 @@ function renderBoard($c, game) {
     <div class="board-wrap">
       <div class="board-grid" id="grid">
         ${game.board.map((row, r) => row.map((cell, c) => `
-          <div class="cell" data-r="${r}" data-c="${c}">
-            <div class="cell-mass"></div>
-          </div>
+          <div class="cell" data-r="${r}" data-c="${c}"><div class="cell-mass"></div></div>
         `).join('')).join('')}
       </div>
     </div>
@@ -66,19 +52,17 @@ function renderBoard($c, game) {
   $c.querySelector('#btn-surrender').addEventListener('click', () => {
      stopEngine();
      setView('dashboard');
-     showToast('Te has rendido.', 'warning');
+     showToast('Te rendiste.', 'warning');
   });
 
   updateBoardDOM($c);
 }
 
 function updateBoardDOM($c) {
-  const game = getGame();
+  const game = window.CW_SESSION;
   if (!game || !game.board) return;
 
   const cells = $c.querySelectorAll('.cell');
-  if (!cells.length) return;
-
   let idx = 0;
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
@@ -86,8 +70,7 @@ function updateBoardDOM($c) {
       const domCell = cells[idx++];
 
       domCell.className = 'cell';
-      if (stateCell.blocked) domCell.classList.add('blocked');
-      else if (stateCell.owner === 'pink') domCell.classList.add('cell-pink');
+      if (stateCell.owner === 'pink') domCell.classList.add('cell-pink');
       else if (stateCell.owner === 'blue') domCell.classList.add('cell-blue');
 
       let orbs = '';
@@ -109,7 +92,7 @@ function showResult($c, winner) {
   div.className = 'result-screen';
   div.innerHTML = `
     <h1 class="result-title ${win ? 'result-win' : 'result-lose'}">${win ? '¡VICTORIA!' : 'DERROTA'}</h1>
-    <p style="color:var(--text-dim);font-family:var(--font-mono);margin-bottom:2rem;">${win ? '+ Premio acreditado a tu cuenta' : 'El bot te ha masacrado'}</p>
+    <p style="color:var(--text-dim);font-family:var(--font-mono);margin-bottom:2rem;">${win ? '+320 Bs acreditados a tu cuenta' : 'El bot te ha masacrado'}</p>
     <button class="btn btn-primary" id="btn-exit">VOLVER AL INICIO</button>
   `;
   $c.appendChild(div);
