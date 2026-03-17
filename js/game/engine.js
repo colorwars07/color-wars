@@ -1,14 +1,14 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/game/engine.js
- * Game Engine: TURN-BASED (10s) - BLINDADO
+ * (Motor Independiente 100% Desacoplado)
  * ═══════════════════════════════════════════════════════
  */
 
-// Ya no importamos getNeighbors ni GAME_CFG. Los independizamos.
-import { updateGameBoard, setGameOver, recordWin, recordLoss, subscribe, getGame } from '../core/state.js';
+import { getProfile, setProfile } from '../core/state.js';
+import { getSupabase } from '../core/supabase.js';
 
-const BOARD_SIZE = 5; // Tamaño fijo y seguro
+const BOARD_SIZE = 5;
 
 let _active = false;
 let _onRender = null;
@@ -20,12 +20,6 @@ let _timeLeft = 10;
 let _isAnimating = false;
 let _turnCount = 0;
 
-const _stateCache = { currentGame: null };
-subscribe('currentGame', (val) => { _stateCache.currentGame = val; });
-(function initCache() { _stateCache.currentGame = getGame(); })();
-function getState(key) { return _stateCache[key]; }
-
-// Helper interno para las explosiones (Ya no depende de app.js)
 function getNeighbors(row, col) {
   const res = [];
   if (row > 0) res.push({row: row - 1, col});
@@ -51,14 +45,13 @@ export function stopEngine() {
 }
 
 export function getCellCounts() {
-  const game = getState('currentGame');
-  if (!game || !game.board) return { pink: 0, blue: 0, neutral: 0 };
+  const game = window.CW_SESSION;
   let pink = 0, blue = 0, neutral = 0;
+  if (!game || !game.board) return { pink, blue, neutral };
+  
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
-      if (!game.board[r] || !game.board[r][c]) continue;
       const cell = game.board[r][c];
-      if (cell.blocked) continue;
       if (cell.owner === 'pink') pink++;
       else if (cell.owner === 'blue') blue++;
       else neutral++;
@@ -69,11 +62,11 @@ export function getCellCounts() {
 
 export function playerClick(row, col) {
   if (!_active || _isAnimating || _currentTurn !== 'pink') return;
-  const game = getState('currentGame');
-  if (!game || game.isOver || !game.board) return;
+  const game = window.CW_SESSION;
+  if (!game || game.isOver) return;
 
   const cell = game.board[row][col];
-  if (cell.blocked || cell.owner === 'blue') return; 
+  if (cell.owner === 'blue') return; 
 
   _clearTimer();
   _addMass(game.board, row, col, 'pink');
@@ -97,7 +90,7 @@ function _startTurn() {
     setTimeout(() => {
       if (!_active || _currentTurn !== 'blue') return;
       _clearTimer();
-      _botMove(getState('currentGame').board);
+      _botMove(window.CW_SESSION.board);
     }, 1500 + Math.random() * 1000);
   }
 }
@@ -134,7 +127,6 @@ async function _addMass(board, row, col, color) {
 async function _processMass(board, row, col, color) {
   if (!_active) return;
   const cell = board[row][col];
-  if (cell.blocked) return;
 
   cell.owner = color;
   cell.mass++;
@@ -142,7 +134,6 @@ async function _processMass(board, row, col, color) {
   if (cell.mass >= 4) { 
     await _explode(board, row, col, color);
   } else {
-    updateGameBoard(board);
     _onRender?.();
   }
 }
@@ -151,7 +142,6 @@ async function _explode(board, row, col, color) {
   if (!_active) return;
   board[row][col].mass = 0;
   board[row][col].owner = null; 
-  updateGameBoard(board);
   _onRender?.();
 
   const neighbors = getNeighbors(row, col);
@@ -159,9 +149,7 @@ async function _explode(board, row, col, color) {
 
   for (const n of neighbors) {
     if (!_active) break;
-    const freshGame = getState('currentGame');
-    if (!freshGame || !freshGame.board) break;
-    await _processMass(freshGame.board, n.row, n.col, color);
+    await _processMass(window.CW_SESSION.board, n.row, n.col, color);
   }
 }
 
@@ -198,7 +186,6 @@ function _checkGameOver(board) {
   let pink = 0, blue = 0;
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
-      if (board[r][c].blocked) continue;
       if (board[r][c].owner === 'pink') pink++;
       else if (board[r][c].owner === 'blue') blue++;
     }
@@ -212,9 +199,24 @@ function _checkGameOver(board) {
 
 async function _finishGame(winner) {
   stopEngine();
-  setGameOver(winner);
-  if (winner === 'pink') await recordWin();
-  else await recordLoss();
+  window.CW_SESSION.isOver = true;
+  
+  try {
+    const profile = getProfile();
+    const sb = getSupabase();
+    
+    if (winner === 'pink') {
+      const newBalance = profile.wallet_bs + 320;
+      const newWins = (profile.wins || 0) + 1;
+      await sb.from('users').update({ wallet_bs: newBalance, wins: newWins }).eq('id', profile.id);
+      setProfile({ ...profile, wallet_bs: newBalance, wins: newWins });
+    } else {
+      const newLosses = (profile.losses || 0) + 1;
+      await sb.from('users').update({ losses: newLosses }).eq('id', profile.id);
+      setProfile({ ...profile, losses: newLosses });
+    }
+  } catch (e) { console.error('Error guardando partida:', e); }
+
   _onGameOver?.(winner);
 }
 
@@ -230,6 +232,6 @@ function _getEmptyCells(board) {
   const res = [];
   for (let r = 0; r < BOARD_SIZE; r++)
     for (let c = 0; c < BOARD_SIZE; c++)
-      if (!board[r][c].owner && !board[r][c].blocked) res.push([r, c]);
+      if (!board[r][c].owner) res.push([r, c]);
   return res;
 }
