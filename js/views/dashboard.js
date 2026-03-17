@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/views/dashboard.js
- * Panel del Jugador: Billetera, Recargas, Retiros y Jugar
+ * Panel del Jugador (Botones de Modales Corregidos)
  * ═══════════════════════════════════════════════════════
  */
 
@@ -58,7 +58,7 @@ function renderDashboard($c, profile) {
 
   <div id="modal-recharge" class="modal-overlay hidden">
     <div class="modal-content">
-      <button class="modal-close" onclick="document.getElementById('modal-recharge').classList.add('hidden')">✕</button>
+      <button class="modal-close btn-close-modal">✕</button>
       <h2 class="modal-title">Realizar Recarga</h2>
       
       <div class="bank-box">
@@ -87,7 +87,7 @@ function renderDashboard($c, profile) {
 
   <div id="modal-withdraw" class="modal-overlay hidden">
     <div class="modal-content">
-      <button class="modal-close" onclick="document.getElementById('modal-withdraw').classList.add('hidden')">✕</button>
+      <button class="modal-close btn-close-modal">✕</button>
       <h2 class="modal-title" style="color:var(--pink);">Retirar Fondos</h2>
       
       <p style="font-family:var(--font-mono); font-size:0.75rem; color:var(--text-dim); margin-bottom:1rem;">
@@ -108,12 +108,26 @@ function renderDashboard($c, profile) {
   </div>
   `;
 
-  // Listeners de Modales
+  // ⚡ AHORA SÍ: Abrir Modales correctamente
   $c.querySelector('#btn-show-recharge').addEventListener('click', () => {
-    $c.querySelector('#modal-recharge').classList.remove('hidden');
+    const m = $c.querySelector('#modal-recharge');
+    m.classList.remove('hidden');
+    setTimeout(() => m.classList.add('visible'), 10);
   });
+  
   $c.querySelector('#btn-show-withdraw').addEventListener('click', () => {
-    $c.querySelector('#modal-withdraw').classList.remove('hidden');
+    const m = $c.querySelector('#modal-withdraw');
+    m.classList.remove('hidden');
+    setTimeout(() => m.classList.add('visible'), 10);
+  });
+
+  // Cerrar Modales
+  $c.querySelectorAll('.btn-close-modal').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const m = e.target.closest('.modal-overlay');
+      m.classList.remove('visible');
+      setTimeout(() => m.classList.add('hidden'), 300);
+    });
   });
 
   // Listener Botón Jugar
@@ -151,15 +165,12 @@ async function submitRecharge($c, profile) {
   const filePath = `${fileName}`;
 
   try {
-    // 1. Subir la foto
     const { error: uploadErr } = await sb.storage.from('comprobantes').upload(filePath, file);
     if (uploadErr) throw uploadErr;
 
-    // 2. Obtener URL pública
     const { data: urlData } = sb.storage.from('comprobantes').getPublicUrl(filePath);
     const usdEquivalent = (bs / getBcvRate()).toFixed(2);
 
-    // 3. Guardar en Base de Datos
     const { error: dbErr } = await sb.from('recharges').insert([{
       user_email: profile.email,
       amount_usd: usdEquivalent,
@@ -171,7 +182,9 @@ async function submitRecharge($c, profile) {
     if (dbErr) throw dbErr;
 
     showToast('Recarga enviada. Esperando aprobación del Admin.', 'success', 4000);
-    $c.querySelector('#modal-recharge').classList.add('hidden');
+    const m = $c.querySelector('#modal-recharge');
+    m.classList.remove('visible');
+    setTimeout(() => m.classList.add('hidden'), 300);
     
   } catch (err) {
     showToast(`Error: ${err.message}`, 'error');
@@ -202,12 +215,10 @@ async function submitWithdraw($c, profile) {
   const sb = getSupabase();
 
   try {
-    // 1. Descontar el saldo inmediatamente para que no puedan gastarlo mientras esperan
     const newBalance = profile.wallet_bs - bs;
     const { error: userErr } = await sb.from('users').update({ wallet_bs: newBalance }).eq('id', profile.id);
     if (userErr) throw userErr;
 
-    // 2. Crear la solicitud de retiro
     const { error: witErr } = await sb.from('withdrawals').insert([{
       user_email: profile.email,
       amount_bs: bs,
@@ -215,7 +226,6 @@ async function submitWithdraw($c, profile) {
     }]);
     if (witErr) throw witErr;
 
-    // Actualizar pantalla
     setProfile({ ...profile, wallet_bs: newBalance });
     showToast('Retiro solicitado. El saldo ha sido descontado.', 'success', 4000);
     renderDashboard($c, getProfile()); 
