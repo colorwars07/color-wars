@@ -5,9 +5,9 @@
  * ═══════════════════════════════════════════════════════
  */
 
-// ── CONFIG — Pon tus llaves reales aquí ──
-const SUPABASE_URL      = 'https://TU_PROYECTO.supabase.co';
-const SUPABASE_ANON_KEY = 'TU_ANON_KEY_LARGUISIMA';
+// ── CONFIG — Llaves reales de Color Wars ──
+const SUPABASE_URL      = 'https://jykubacvcysohszqmrpu.supabase.co';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imp5a3ViYWN2Y3lzb2hzenFtcnB1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzM2OTgwNDcsImV4cCI6MjA4OTI3NDA0N30.stp5GQpHhqfg5tJTe-zkk-xx3E8tRhQH2ywe6OGVubA';
 
 let _client = null;
 
