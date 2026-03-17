@@ -39,6 +39,23 @@ export function stopEngine() {
   if (_turnTimer) clearInterval(_turnTimer);
 }
 
+// 🔥 AQUÍ ESTÁ LA FUNCIÓN QUE FALTABA PARA CONTAR LOS PUNTOS 🔥
+export function getCellCounts() {
+  const game = getState('currentGame');
+  if (!game) return { pink: 0, blue: 0, neutral: 0 };
+  let pink = 0, blue = 0, neutral = 0;
+  for (let r = 0; r < GAME_CFG.BOARD_SIZE; r++) {
+    for (let c = 0; c < GAME_CFG.BOARD_SIZE; c++) {
+      const cell = game.board[r][c];
+      if (cell.blocked) continue;
+      if (cell.owner === 'pink') pink++;
+      else if (cell.owner === 'blue') blue++;
+      else neutral++;
+    }
+  }
+  return { pink, blue, neutral };
+}
+
 export function playerClick(row, col) {
   if (!_active || _isAnimating || _currentTurn !== 'pink') return;
 
