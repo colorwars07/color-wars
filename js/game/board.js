@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/game/board.js
- * MONOLITO: UI + Motor de Juego (Cero Errores de Importación)
+ * MONOLITO: Expansión Territorial Estricta
  * ═══════════════════════════════════════════════════════
  */
 
@@ -29,7 +29,6 @@ export async function initGameView($container) {
     return;
   }
 
-  // Reiniciamos todo al entrar a la arena
   _active = true;
   _currentTurn = 'pink';
   _isAnimating = false;
@@ -49,23 +48,21 @@ function renderHTML() {
       <div style="color:var(--blue);font-weight:900;font-size:1.2rem;text-shadow:0 0 10px var(--blue);">BOT: <span id="score-blue">0</span></div>
     </div>
     <div class="board-wrap">
-      <div class="board-grid" id="grid">
+      <div class="board-grid" id="grid" style="display:grid; grid-template-columns:repeat(5,1fr); gap:5px;">
         ${window.CW_SESSION.board.map((row, r) => row.map((_, c) => `
           <div class="cell" data-r="${r}" data-c="${c}"><div class="cell-mass"></div></div>
         `).join('')).join('')}
       </div>
     </div>
-    <button id="btn-surrender" class="btn btn-ghost" style="margin-top:20px;font-size:0.7rem;">🏳️ Rendirse</button>
+    <button id="btn-surrender" class="btn btn-ghost" style="margin-top:20px;">🏳️ Rendirse</button>
   </div>`;
 
-  // Clic en el tablero
   _$container.querySelector('#grid').addEventListener('click', (e) => {
     const cell = e.target.closest('.cell');
     if (!cell) return;
     handlePlayerClick(parseInt(cell.dataset.r), parseInt(cell.dataset.c));
   });
 
-  // Clic en rendirse
   _$container.querySelector('#btn-surrender').addEventListener('click', () => {
     _active = false;
     clearInterval(_turnTimer);
@@ -100,10 +97,26 @@ function updateDOM() {
   _$container.querySelector('#score-blue').textContent = blueScore;
 }
 
+// ⚡ LÓGICA DE JUGADOR CORREGIDA (Expansión Estricta)
 function handlePlayerClick(row, col) {
   if (!_active || _isAnimating || _currentTurn !== 'pink') return;
   const cell = window.CW_SESSION.board[row][col];
-  if (cell.owner === 'blue') return; // No tocar las del enemigo
+  
+  if (cell.owner === 'blue') return; // Nunca tocar las del enemigo directo
+
+  // Contar cuántas casillas rosas tienes ya en el tablero
+  let myCellsCount = 0;
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (window.CW_SESSION.board[r][c].owner === 'pink') myCellsCount++;
+    }
+  }
+
+  // REGLA CLAVE: Si ya tienes casillas, SOLO puedes tocar las tuyas.
+  // Si tienes 0 (tu primer turno), puedes tocar una vacía para empezar.
+  if (myCellsCount > 0 && cell.owner !== 'pink') {
+    return; // Ignora el clic si intenta tocar una esquina vacía
+  }
 
   clearInterval(_turnTimer);
   _addMass(row, col, 'pink');
@@ -119,11 +132,10 @@ function _startTurn() {
     updateTimerUI();
     if (_timeLeft <= 0) {
       clearInterval(_turnTimer);
-      _passTurn(); // Te quedaste sin tiempo
+      _passTurn(); 
     }
   }, 1000);
 
-  // Turno del bot
   if (_currentTurn === 'blue') {
     setTimeout(() => {
       if (!_active || _currentTurn !== 'blue') return;
@@ -161,7 +173,6 @@ async function _addMass(row, col, color) {
 async function _processMass(row, col, color) {
   if (!_active) return;
   const cell = window.CW_SESSION.board[row][col];
-
   cell.owner = color;
   cell.mass++;
 
@@ -174,20 +185,16 @@ async function _processMass(row, col, color) {
 
 async function _explode(row, col, color) {
   if (!_active) return;
-  
-  // La casilla explota y se vuelve neutral
   window.CW_SESSION.board[row][col].mass = 0;
-  window.CW_SESSION.board[row][col].owner = null;
+  window.CW_SESSION.board[row][col].owner = null; // Queda neutral
   updateDOM();
 
-  // Calcular vecinos (Arriba, Abajo, Izquierda, Derecha)
   const neighbors = [];
   if (row > 0) neighbors.push({row: row - 1, col});
   if (row < BOARD_SIZE - 1) neighbors.push({row: row + 1, col});
   if (col > 0) neighbors.push({row, col: col - 1});
   if (col < BOARD_SIZE - 1) neighbors.push({row, col: col + 1});
 
-  // Efecto visual rápido
   await new Promise(r => setTimeout(r, 200));
 
   for (const n of neighbors) {
@@ -196,12 +203,21 @@ async function _explode(row, col, color) {
   }
 }
 
+// ⚡ LÓGICA DE BOT CORREGIDA (Expansión Estricta)
 function _botMove() {
   const board = window.CW_SESSION.board;
+  
+  // Contar cuántas casillas azules tiene el bot
+  let botCellsCount = 0;
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      if (board[r][c].owner === 'blue') botCellsCount++;
+    }
+  }
+
   const roll = Math.floor(Math.random() * 100) + 1;
 
   if (roll <= 65) {
-    // 65%: Ataque inteligente (buscar casillas a punto de explotar)
     const ready = [];
     for(let r=0; r<BOARD_SIZE; r++) for(let c=0; c<BOARD_SIZE; c++) if(board[r][c].owner === 'blue' && board[r][c].mass === 3) ready.push({r,c});
     if (ready.length) {
@@ -211,9 +227,18 @@ function _botMove() {
     }
   }
 
-  // 35% o fallback: Jugar en lugares vacíos o propios seguros
   const pool = [];
-  for(let r=0; r<BOARD_SIZE; r++) for(let c=0; c<BOARD_SIZE; c++) if(!board[r][c].owner || (board[r][c].owner === 'blue' && board[r][c].mass <= 1)) pool.push({r,c});
+  for(let r=0; r<BOARD_SIZE; r++) {
+    for(let c=0; c<BOARD_SIZE; c++) {
+      // Si el bot no tiene casillas (primer turno), busca vacías. 
+      // Si ya tiene, SOLO busca las suyas.
+      if (botCellsCount === 0 && !board[r][c].owner) {
+         pool.push({r,c});
+      } else if (board[r][c].owner === 'blue') {
+         pool.push({r,c});
+      }
+    }
+  }
   
   if (pool.length) {
     const move = pool[Math.floor(Math.random() * pool.length)];
@@ -234,7 +259,6 @@ function _checkGameOver() {
     }
   }
   
-  // Regla de victoria: Alguien se queda sin fichas DESPUÉS del segundo turno
   if (_turnCount >= 2) {
      if (pink === 0 && blue > 0) { _finishGame('blue'); return true; }
      if (blue === 0 && pink > 0) { _finishGame('pink'); return true; }
@@ -245,15 +269,12 @@ function _checkGameOver() {
 async function _finishGame(winner) {
   _active = false;
   clearInterval(_turnTimer);
-  window.CW_SESSION.isOver = true;
-
   const win = winner === 'pink';
   
   try {
     const profile = getProfile();
     const sb = getSupabase();
     
-    // Asignar premios y castigos en la Base de Datos
     if (win) {
       const newBalance = Number(profile.wallet_bs) + 320;
       const newWins = (profile.wins || 0) + 1;
@@ -264,9 +285,8 @@ async function _finishGame(winner) {
       await sb.from('users').update({ losses: newLosses }).eq('id', profile.id);
       setProfile({ ...profile, losses: newLosses });
     }
-  } catch (e) { console.error('Error bd:', e); }
+  } catch (e) {}
 
-  // Pantalla final
   _$container.innerHTML += `
     <div class="result-screen">
       <h1 class="result-title ${win ? 'result-win' : 'result-lose'}">${win ? '¡VICTORIA!' : 'DERROTA'}</h1>
