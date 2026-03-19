@@ -384,7 +384,7 @@ function openWithdrawModal() {
   document.getElementById('btn-wd-submit')?.addEventListener('click', submitWithdraw);
 }
 
-// ⚡ LÓGICA DE RETIRO BLINDADA (Igual a Recargas, cero errores)
+// ⚡ LÓGICA DE RETIRO CON ESCÁNER DE ERRORES REALES
 async function submitWithdraw() {
   const amount = parseFloat(document.getElementById('wd-amount')?.value);
   const bank   = document.getElementById('wd-bank')?.value.trim();
@@ -409,23 +409,23 @@ async function submitWithdraw() {
   const sb = getSupabase();
 
   try {
-    // 1. Guardamos el recibo (SIN PEDIR COPIA DE VUELTA para que Supabase no tranque)
-    const { error: insertErr } = await sb.from('withdrawals').insert({
+    // 1. Intentamos guardar el recibo (OJO: mando los datos como Array por reglas estrictas de Supabase)
+    const { error: insertErr } = await sb.from('withdrawals').insert([{
       user_email: profile.email || 'Jugador',
       amount_bs: amount,
       bank: bank,
       phone: phone,
       ci: ci,
       status: 'pending'
-    });
+    }]);
 
-    if (insertErr) throw new Error("Error en Supabase: " + insertErr.message);
+    if (insertErr) throw new Error("DB Error: " + insertErr.message);
 
     // 2. Si se guardó, descontamos la plata
     const newBalance = bs - amount;
     const { error: updateErr } = await sb.from('users').update({ wallet_bs: newBalance }).eq('id', profile.id);
 
-    if (updateErr) throw new Error("Error descontando saldo: " + updateErr.message);
+    if (updateErr) throw new Error("Update Error: " + updateErr.message);
 
     hideModal();
     showToast(`Retiro de ${amount.toLocaleString('es-VE')} Bs en proceso.`, 'info', 6000);
@@ -434,8 +434,9 @@ async function submitWithdraw() {
     setView('dashboard');
 
   } catch (error) {
-    console.error("Error en retiro:", error);
-    $err.textContent = 'Error procesando el retiro. Tu dinero está a salvo. Intenta de nuevo.';
+    // 🔥 AQUÍ ESTÁ LA MAGIA: IMPRIME EL ERROR REAL QUE MANDA SUPABASE EN PANTALLA
+    console.error(error);
+    $err.innerHTML = `<strong>Falla detectada:</strong> ${error.message}`;
   } finally {
     $btn.disabled = false; $btn.textContent = 'SOLICITAR RETIRO'; $btn.style.opacity = '1';
   }
