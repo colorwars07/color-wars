@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/game/board.js
- * MONOLITO: Expansión Territorial Estricta
+ * MONOLITO: Tablero + Bot Inteligente/Alternante
  * ═══════════════════════════════════════════════════════
  */
 
@@ -40,12 +40,15 @@ export async function initGameView($container) {
 }
 
 function renderHTML() {
+  // Leemos el nombre del rival (o ponemos BOT si por alguna razón falla)
+  const rivalName = window.CW_SESSION.botName || 'BOT';
+
   _$container.innerHTML = `
   <div class="game-arena">
     <div class="game-hud">
       <div style="color:var(--pink);font-weight:900;font-size:1.2rem;text-shadow:0 0 10px var(--pink);">TÚ: <span id="score-pink">0</span></div>
       <div class="hud-timer">00:10</div>
-      <div style="color:var(--blue);font-weight:900;font-size:1.2rem;text-shadow:0 0 10px var(--blue);">BOT: <span id="score-blue">0</span></div>
+      <div style="color:var(--blue);font-weight:900;font-size:1.1rem;text-shadow:0 0 10px var(--blue); text-transform:uppercase;">${rivalName}: <span id="score-blue">0</span></div>
     </div>
     <div class="board-wrap">
       <div class="board-grid" id="grid" style="display:grid; grid-template-columns:repeat(5,1fr); gap:5px;">
@@ -97,14 +100,13 @@ function updateDOM() {
   _$container.querySelector('#score-blue').textContent = blueScore;
 }
 
-// ⚡ LÓGICA DE JUGADOR CORREGIDA (Expansión Estricta)
+// ⚡ LÓGICA DE JUGADOR (Expansión Estricta)
 function handlePlayerClick(row, col) {
   if (!_active || _isAnimating || _currentTurn !== 'pink') return;
   const cell = window.CW_SESSION.board[row][col];
   
-  if (cell.owner === 'blue') return; // Nunca tocar las del enemigo directo
+  if (cell.owner === 'blue') return; 
 
-  // Contar cuántas casillas rosas tienes ya en el tablero
   let myCellsCount = 0;
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
@@ -112,10 +114,8 @@ function handlePlayerClick(row, col) {
     }
   }
 
-  // REGLA CLAVE: Si ya tienes casillas, SOLO puedes tocar las tuyas.
-  // Si tienes 0 (tu primer turno), puedes tocar una vacía para empezar.
   if (myCellsCount > 0 && cell.owner !== 'pink') {
-    return; // Ignora el clic si intenta tocar una esquina vacía
+    return; // Candado: No puede tocar casillas vacías si ya tiene suyas
   }
 
   clearInterval(_turnTimer);
@@ -186,7 +186,7 @@ async function _processMass(row, col, color) {
 async function _explode(row, col, color) {
   if (!_active) return;
   window.CW_SESSION.board[row][col].mass = 0;
-  window.CW_SESSION.board[row][col].owner = null; // Queda neutral
+  window.CW_SESSION.board[row][col].owner = null; 
   updateDOM();
 
   const neighbors = [];
@@ -203,11 +203,11 @@ async function _explode(row, col, color) {
   }
 }
 
-// ⚡ LÓGICA DE BOT CORREGIDA (Expansión Estricta)
+// ⚡ LÓGICA DE BOT ALTERNANTE (Diablo vs Tonto)
 function _botMove() {
   const board = window.CW_SESSION.board;
+  const humanWinsNext = window.CW_SESSION.humanWinsNext; 
   
-  // Contar cuántas casillas azules tiene el bot
   let botCellsCount = 0;
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
@@ -215,9 +215,9 @@ function _botMove() {
     }
   }
 
-  const roll = Math.floor(Math.random() * 100) + 1;
-
-  if (roll <= 65) {
+  // --- MODO DIABLO (El bot te quiere masacrar) ---
+  if (humanWinsNext === false) {
+    // 1. Buscar explotar (Masa 3)
     const ready = [];
     for(let r=0; r<BOARD_SIZE; r++) for(let c=0; c<BOARD_SIZE; c++) if(board[r][c].owner === 'blue' && board[r][c].mass === 3) ready.push({r,c});
     if (ready.length) {
@@ -225,13 +225,20 @@ function _botMove() {
       _addMass(move.r, move.c, 'blue');
       return;
     }
-  }
-
+    // 2. Engordar casillas
+    const build = [];
+    for(let r=0; r<BOARD_SIZE; r++) for(let c=0; c<BOARD_SIZE; c++) if(board[r][c].owner === 'blue' && board[r][c].mass > 0) build.push({r,c});
+    if (build.length) {
+      const move = build[Math.floor(Math.random() * build.length)];
+      _addMass(move.r, move.c, 'blue');
+      return;
+    }
+  } 
+  
+  // --- MODO TONTO (El bot te deja ganar) O MODO INICIO ---
   const pool = [];
   for(let r=0; r<BOARD_SIZE; r++) {
     for(let c=0; c<BOARD_SIZE; c++) {
-      // Si el bot no tiene casillas (primer turno), busca vacías. 
-      // Si ya tiene, SOLO busca las suyas.
       if (botCellsCount === 0 && !board[r][c].owner) {
          pool.push({r,c});
       } else if (board[r][c].owner === 'blue') {
@@ -239,10 +246,18 @@ function _botMove() {
       }
     }
   }
-  
+
   if (pool.length) {
-    const move = pool[Math.floor(Math.random() * pool.length)];
-    _addMass(move.r, move.c, 'blue');
+    // Si está en Modo Tonto, evita explotar casillas si es posible
+    if (humanWinsNext === true && botCellsCount > 0) {
+        const dumbPool = pool.filter(p => board[p.r][p.c].mass < 3);
+        const finalPool = dumbPool.length > 0 ? dumbPool : pool;
+        const move = finalPool[Math.floor(Math.random() * finalPool.length)];
+        _addMass(move.r, move.c, 'blue');
+    } else {
+        const move = pool[Math.floor(Math.random() * pool.length)];
+        _addMass(move.r, move.c, 'blue');
+    }
   } else {
     _passTurn();
   }
@@ -290,7 +305,7 @@ async function _finishGame(winner) {
   _$container.innerHTML += `
     <div class="result-screen">
       <h1 class="result-title ${win ? 'result-win' : 'result-lose'}">${win ? '¡VICTORIA!' : 'DERROTA'}</h1>
-      <p style="color:var(--text-dim);font-family:var(--font-mono);margin-bottom:2rem;">${win ? '+320 Bs acreditados' : 'El bot te masacró'}</p>
+      <p style="color:var(--text-dim);font-family:var(--font-mono);margin-bottom:2rem;">${win ? '+320 Bs acreditados' : 'Te han masacrado'}</p>
       <button class="btn btn-primary" id="btn-exit">VOLVER AL INICIO</button>
     </div>
   `;
