@@ -17,29 +17,24 @@ registerView('dashboard', initDashboardView);
 let _unsubs = [];
 
 export async function initDashboardView($container) {
-  // Clean previous subscriptions
   _unsubs.forEach(fn => fn());
   _unsubs = [];
 
-  // Ensure fresh data
   await reloadBcvRate();
   await reloadProfile();
 
-  // ⚡ 1. INYECCIÓN INVISIBLE: DETECTOR DE RECONEXIÓN
   const profile = getProfile();
   if (profile) {
     const isReconnected = await checkActiveMatch(profile);
-    if (isReconnected) return; // Si encontró partida colgada, aborta el dashboard y va a la arena
+    if (isReconnected) return; 
   }
 
   render($container);
 
-  // Re-render on profile or rate changes
   _unsubs.push(subscribe('profile', () => render($container)));
   _unsubs.push(subscribe('bcvRate', () => render($container)));
 }
 
-// ⚡ 2. LA LÓGICA DE RECONEXIÓN (Funciona por detrás, no rompe el diseño)
 async function checkActiveMatch(profile) {
   const sb = getSupabase();
   try {
@@ -71,7 +66,6 @@ async function checkActiveMatch(profile) {
   return false; 
 }
 
-// ── RENDER ────────────────────────────────────────────
 function render($c) {
   const profile = getProfile();
   if (!profile) { setView('auth'); return; }
@@ -156,7 +150,6 @@ function statRow(label, val, color, glow) {
   </div>`;
 }
 
-// ── Events ────────────────────────────────────────────
 function attachEvents($c) {
   $c.querySelector('#btn-recharge')?.addEventListener('click', openRechargeModal);
   $c.querySelector('#btn-withdraw')?.addEventListener('click', openWithdrawModal);
@@ -169,7 +162,6 @@ function attachEvents($c) {
   });
 }
 
-// ── Leaderboard ────────────────────────────────────────
 async function loadLeaderboard($c) {
   const sb = getSupabase();
   const { data, error } = await sb
@@ -206,7 +198,6 @@ async function loadLeaderboard($c) {
   </table>`;
 }
 
-// ── RECHARGE MODAL ────────────────────────────────────
 function openRechargeModal() {
   const rate = getBcvRate();
 
@@ -256,7 +247,6 @@ function openRechargeModal() {
       Tu recarga quedará en estado <strong style="color:#ffaa00;">Pendiente</strong> hasta aprobación del admin.
     </p>`, { closable: false });
 
-  // Dynamic calculator
   const $amount = document.getElementById('rc-amount');
   const $calc   = document.getElementById('rc-calc');
   const $bsRes  = document.getElementById('rc-bs-result');
@@ -274,7 +264,6 @@ function openRechargeModal() {
     }
   });
 
-  // File label update
   const $file  = document.getElementById('rc-file');
   const $label = document.getElementById('rc-file-label');
   $file?.addEventListener('change', () => {
@@ -284,7 +273,6 @@ function openRechargeModal() {
     }
   });
 
-  // Ref — digits only
   document.getElementById('rc-ref')?.addEventListener('input', e => {
     e.target.value = e.target.value.replace(/\D/g,'').slice(0,6);
   });
@@ -327,7 +315,6 @@ async function submitRecharge() {
   const ext     = file.name.split('.').pop();
   const path    = `${profile.id}_${Date.now()}.${ext}`;
 
-  // Upload to Storage
   const { error: uploadErr } = await sb.storage
     .from('comprobantes')
     .upload(path, file, { cacheControl: '3600', upsert: false });
@@ -338,11 +325,9 @@ async function submitRecharge() {
     return;
   }
 
-  // Get public URL
   const { data: urlData } = sb.storage.from('comprobantes').getPublicUrl(path);
   const imageUrl = urlData?.publicUrl ?? '';
 
-  // Insert recharge record
   const bs = parseFloat((usd * rate).toFixed(2));
   const { error: insertErr } = await sb.from('recharges').insert({
     user_email: profile.email,
@@ -364,7 +349,6 @@ async function submitRecharge() {
   showToast(`Solicitud enviada por $${usd.toFixed(2)} (${bs.toLocaleString('es-VE')} Bs). Estado: Pendiente.`, 'warning', 6000);
 }
 
-// ── WITHDRAW MODAL ────────────────────────────────────
 function openWithdrawModal() {
   const bs = getWalletBs();
 
@@ -400,7 +384,7 @@ function openWithdrawModal() {
   document.getElementById('btn-wd-submit')?.addEventListener('click', submitWithdraw);
 }
 
-// ⚡ FUNCIÓN DE RETIRO BLINDADA (Descuenta saldo y guarda en Supabase)
+// ⚡ LÓGICA DE RETIRO BLINDADA (Cero robos)
 async function submitWithdraw() {
   const amount = parseFloat(document.getElementById('wd-amount')?.value);
   const bank   = document.getElementById('wd-bank')?.value.trim();
@@ -425,39 +409,43 @@ async function submitWithdraw() {
   const sb = getSupabase();
 
   try {
-    // 1. DESCONTAMOS EL SALDO INMEDIATAMENTE para evitar doble cobro
-    const newBalance = bs - amount;
-    const { error: updateErr } = await sb.from('users').update({ wallet_bs: newBalance }).eq('id', profile.id);
-    if (updateErr) throw updateErr;
-
-    // 2. GUARDAMOS EL RECIBO EN SUPABASE
-    const { error: insertErr } = await sb.from('withdrawals').insert({
-      user_email: profile.email,
+    // 1. PRIMERO INTENTAMOS GUARDAR EL RECIBO EN LA BASE DE DATOS
+    const { data: wdData, error: insertErr } = await sb.from('withdrawals').insert({
+      user_email: profile.email || 'Jugador',
       amount_bs: amount,
       bank: bank,
       phone: phone,
       ci: ci,
       status: 'pending'
-    });
-    if (insertErr) throw insertErr;
+    }).select().single();
 
-    // 3. ÉXITO: Limpiamos la pantalla y avisamos
+    // Si la base de datos falla, lanzamos error y NO DESCONTAMOS NADA.
+    if (insertErr) throw new Error("Error de conexión al guardar el recibo. No se descontó saldo.");
+
+    // 2. SI EL RECIBO SE GUARDÓ PERFECTO, AHORA SÍ DESCONTAMOS EL SALDO
+    const newBalance = bs - amount;
+    const { error: updateErr } = await sb.from('users').update({ wallet_bs: newBalance }).eq('id', profile.id);
+
+    if (updateErr) {
+      // Si por alguna locura el internet se cae aquí, borramos el recibo para que el admin no lo vea y no pague de gratis
+      await sb.from('withdrawals').delete().eq('id', wdData.id);
+      throw new Error("Error de conexión al descontar saldo. Operación cancelada.");
+    }
+
     hideModal();
     showToast(`Retiro de ${amount.toLocaleString('es-VE')} Bs en proceso.`, 'info', 6000);
     
-    // Recargamos el perfil globalmente y repintamos el dashboard
     await reloadProfile();
     setView('dashboard');
 
   } catch (error) {
-    console.error("Error en retiro:", error);
-    $err.textContent = 'Error procesando el retiro. Intenta de nuevo.';
+    console.error("Falla de seguridad prevenida en retiro:", error);
+    $err.textContent = 'Error procesando el retiro. Tu dinero está a salvo. Intenta de nuevo.';
   } finally {
     $btn.disabled = false; $btn.textContent = 'SOLICITAR RETIRO'; $btn.style.opacity = '1';
   }
 }
 
-// ── Donut SVG ─────────────────────────────────────────
 function buildDonut(winPct) {
   const R   = 46;
   const CX  = 62; const CY = 62;
