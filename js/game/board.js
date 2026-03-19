@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/game/board.js
- * MONOLITO FINAL: MULTIJUGADOR REAL + IA DEL BOT
+ * TABLERO DEFINITIVO: GUARDADO EN NUBE + 30s DE GRACIA
  * ═══════════════════════════════════════════════════════
  */
 
@@ -13,11 +13,13 @@ const BOARD_SIZE = 5;
 let _active = false;
 let _currentTurn = 'pink';
 let _turnTimer = null;
+let _graceTimer = null;
 let _timeLeft = 10;
+let _totalWait = 0;
 let _isAnimating = false;
 let _turnCount = 0;
 let _$container = null; 
-let _matchChannel = null; // El cable para el multijugador
+let _matchChannel = null; 
 
 registerView('game', initGameView);
 
@@ -31,19 +33,42 @@ export async function initGameView($container) {
   }
 
   _active = true;
-  _currentTurn = 'pink'; // El juego siempre arranca con el Rosado
+  _currentTurn = 'pink'; 
   _isAnimating = false;
   _turnCount = 0;
 
-  // Si es una partida entre humanos, conectamos el cable para escuchar al rival
+  const sb = getSupabase();
+
+  // ⚡ SI ES MULTIJUGADOR, RECUPERAMOS EL TABLERO DE LA BASE DE DATOS Y CONECTAMOS EL CABLE
   if (!window.CW_SESSION.isBotMatch && window.CW_SESSION.matchId) {
-    const sb = getSupabase();
+    
+    // 1. Verificamos cómo está la partida en Supabase al entrar
+    try {
+      const { data: matchData } = await sb.from('matches').select('*').eq('id', window.CW_SESSION.matchId).single();
+      if (matchData) {
+        if (matchData.board_state) window.CW_SESSION.board = matchData.board_state;
+        if (matchData.current_turn) _currentTurn = matchData.current_turn;
+      }
+    } catch(e) { console.error("Error cargando tablero:", e); }
+
+    // 2. Nos suscribimos a los cambios oficiales en la tabla
     _matchChannel = sb.channel(`game_${window.CW_SESSION.matchId}`)
-      .on('broadcast', { event: 'player_move' }, (payload) => {
-        // Cuando el rival hace clic en su teléfono, esto lo recibe y lo dibuja
-        if (!_active) return;
-        clearInterval(_turnTimer);
-        _addMass(payload.payload.r, payload.payload.c, payload.payload.color);
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${window.CW_SESSION.matchId}` }, (payload) => {
+        const newData = payload.new;
+        
+        // Si alguien ganó o se rindió por Supabase
+        if (newData.status === 'finished' || newData.status === 'cancelled') {
+           if (newData.winner) _finishGame(newData.winner, true);
+           return;
+        }
+
+        // Si el rival hizo una jugada y pasó el turno, actualizamos nuestro tablero
+        if (newData.current_turn === window.CW_SESSION.myColor && _currentTurn !== window.CW_SESSION.myColor) {
+           window.CW_SESSION.board = newData.board_state;
+           _currentTurn = newData.current_turn;
+           updateDOM();
+           _startTurn();
+        }
       })
       .subscribe();
   }
@@ -54,15 +79,13 @@ export async function initGameView($container) {
 }
 
 function renderHTML() {
-  const isBot = window.CW_SESSION.isBotMatch;
   const myColor = window.CW_SESSION.myColor || 'pink';
   const rivalName = window.CW_SESSION.rivalName || window.CW_SESSION.botName || 'BOT';
 
-  // Mostrar quién eres tú y quién es el rival
-  const youText = myColor === 'pink' ? 'TÚ (ROSADO)' : 'TÚ (AZUL)';
+  const youText = myColor === 'pink' ? 'TÚ (ROSA)' : 'TÚ (AZUL)';
   const youColorVar = myColor === 'pink' ? 'var(--pink)' : 'var(--blue)';
   
-  const rivalText = myColor === 'pink' ? `${rivalName} (AZUL)` : `${rivalName} (ROSADO)`;
+  const rivalText = myColor === 'pink' ? `${rivalName} (AZUL)` : `${rivalName} (ROSA)`;
   const rivalColorVar = myColor === 'pink' ? 'var(--blue)' : 'var(--pink)';
 
   _$container.innerHTML = `
@@ -93,11 +116,9 @@ function renderHTML() {
   });
 
   _$container.querySelector('#btn-surrender').addEventListener('click', () => {
-    _active = false;
-    clearInterval(_turnTimer);
-    if (_matchChannel) _matchChannel.unsubscribe();
-    setView('dashboard');
-    showToast('Abandonaste la partida.', 'warning');
+    // Si te rindes, le das la victoria al otro
+    const rivalColor = window.CW_SESSION.myColor === 'pink' ? 'blue' : 'pink';
+    _finishGame(rivalColor);
   });
 }
 
@@ -133,102 +154,142 @@ function updateDOM() {
   }
 }
 
-// ⚡ LÓGICA DE JUGADOR MULTIJUGADOR
 function handlePlayerClick(row, col) {
   const myColor = window.CW_SESSION.myColor || 'pink';
   
-  // 1. Candados básicos
   if (!_active || _isAnimating) return;
   
-  // 2. CANDADO DE TURNO: Si no es tu color, no puedes jugar
   if (_currentTurn !== myColor) {
-    showToast('No es tu turno', 'warning');
+    showToast('Espera tu turno', 'warning');
     return; 
   }
 
   const cell = window.CW_SESSION.board[row][col];
-  
-  // 3. No tocar casillas del rival
   if (cell.owner && cell.owner !== myColor) return; 
 
-  // 4. Regla de expansión estricta
   let myCellsCount = 0;
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
       if (window.CW_SESSION.board[r][c].owner === myColor) myCellsCount++;
     }
   }
-  if (myCellsCount > 0 && cell.owner !== myColor) {
-    return; // Ignora el clic si intenta tocar vacía
-  }
+  if (myCellsCount > 0 && cell.owner !== myColor) return; 
 
-  // Si pasamos los candados, frenamos el reloj y hacemos la jugada
   clearInterval(_turnTimer);
-
-  // Si es partida online, le avisamos al rival por el cable
-  if (!window.CW_SESSION.isBotMatch && _matchChannel) {
-    _matchChannel.send({
-      type: 'broadcast',
-      event: 'player_move',
-      payload: { r: row, c: col, color: myColor }
-    });
-  }
-
-  // Dibujamos en nuestra propia pantalla
   _addMass(row, col, myColor);
 }
 
 function _startTurn() {
   if (!_active) return;
+  clearInterval(_turnTimer);
+  clearInterval(_graceTimer);
   _timeLeft = 10;
   updateTimerUI();
 
-  _turnTimer = setInterval(() => {
-    _timeLeft--;
-    updateTimerUI();
-    if (_timeLeft <= 0) {
-      clearInterval(_turnTimer);
-      // Si se acaba el tiempo y es mi turno, le aviso al otro que perdí el turno
-      if (!window.CW_SESSION.isBotMatch && _currentTurn === window.CW_SESSION.myColor && _matchChannel) {
-         _matchChannel.send({ type: 'broadcast', event: 'player_move', payload: { pass: true } });
-      }
-      _passTurn(); 
-    }
-  }, 1000);
+  const myColor = window.CW_SESSION.myColor || 'pink';
 
-  // Lógica de Inteligencia Artificial (SOLO SI ES PARTIDA CONTRA BOT)
-  if (window.CW_SESSION.isBotMatch && _currentTurn === 'blue') {
-    setTimeout(() => {
-      if (!_active || _currentTurn !== 'blue') return;
-      clearInterval(_turnTimer);
-      _botMove();
-    }, 1000 + Math.random() * 1000);
+  if (_currentTurn === myColor) {
+    // ⚡ MI TURNO: Corre el reloj de 10 segundos
+    _turnTimer = setInterval(() => {
+      _timeLeft--;
+      updateTimerUI();
+      if (_timeLeft <= 0) {
+        clearInterval(_turnTimer);
+        _passTurn(); // Pierdo el turno por lento
+      }
+    }, 1000);
+  } else {
+    // ⚡ TURNO DEL RIVAL
+    if (!window.CW_SESSION.isBotMatch) {
+      // MODO MULTIJUGADOR: Damos 10s normales + 30s de gracia = 40s total
+      _totalWait = 40; 
+      _graceTimer = setInterval(() => {
+        _totalWait--;
+        
+        if (_totalWait <= 30) {
+           updateTimerUI(_totalWait); // Muestra el reloj rojo de emergencia
+        } else {
+           updateTimerUI(); // Muestra "ESPERANDO" normal
+        }
+
+        if (_totalWait <= 0) {
+           // Se le acabó la gracia, declaro victoria por abandono
+           clearInterval(_graceTimer);
+           claimForfeitVictory(); 
+        }
+      }, 1000);
+    } else {
+      // MODO BOT: El bot juega rapidito
+      setTimeout(() => {
+        if (!_active || _currentTurn !== 'blue') return;
+        _botMove();
+      }, 1000 + Math.random() * 1000);
+    }
   }
 }
 
-function updateTimerUI() {
+function updateTimerUI(graceTime = null) {
   const el = _$container.querySelector('.hud-timer');
   const myColor = window.CW_SESSION.myColor || 'pink';
   
-  if (el) {
-    if (_currentTurn === myColor) {
-      el.textContent = `TU TURNO: ${_timeLeft.toString().padStart(2, '0')}`;
-      el.style.color = "white";
-    } else {
-      el.textContent = `ESPERANDO: ${_timeLeft.toString().padStart(2, '0')}`;
-      el.style.color = "var(--text-dim)";
-    }
-    
-    if (_timeLeft <= 3) el.classList.add('urgent');
-    else el.classList.remove('urgent');
+  if (!el) return;
+
+  if (graceTime !== null) {
+    el.innerHTML = `<span style="font-size:0.7rem;">DESCONECTADO</span><br>${graceTime}s`;
+    el.style.color = "var(--pink)";
+    el.classList.add('urgent');
+    return;
   }
+
+  if (_currentTurn === myColor) {
+    el.textContent = `TU TURNO: ${_timeLeft.toString().padStart(2, '0')}`;
+    el.style.color = "white";
+  } else {
+    el.textContent = `ESPERANDO: ${_timeLeft.toString().padStart(2, '0')}`;
+    el.style.color = "var(--text-dim)";
+  }
+  
+  if (_timeLeft <= 3) el.classList.add('urgent');
+  else el.classList.remove('urgent');
 }
 
-function _passTurn() {
+async function claimForfeitVictory() {
+  if (!_active) return;
+  const myColor = window.CW_SESSION.myColor || 'pink';
+  const sb = getSupabase();
+  
+  // Le avisamos a Supabase que el rival se fue y yo gané
+  await sb.from('matches').update({
+     status: 'finished',
+     winner: myColor
+  }).eq('id', window.CW_SESSION.matchId);
+  
+  _finishGame(myColor, true);
+}
+
+async function _passTurn() {
   if (!_active) return;
   _turnCount++;
-  _currentTurn = _currentTurn === 'pink' ? 'blue' : 'pink';
-  _startTurn();
+  const nextTurn = _currentTurn === 'pink' ? 'blue' : 'pink';
+
+  if (window.CW_SESSION.isBotMatch) {
+     _currentTurn = nextTurn;
+     _startTurn();
+  } else {
+     // ⚡ GUARDAMOS EL TABLERO EN LA NUBE Y LE PASAMOS EL TURNO AL OTRO
+     if (_currentTurn === window.CW_SESSION.myColor) {
+        _currentTurn = nextTurn; 
+        updateTimerUI(); // Bloqueamos la pantalla rápido
+        
+        const sb = getSupabase();
+        await sb.from('matches').update({
+           board_state: window.CW_SESSION.board,
+           current_turn: nextTurn
+        }).eq('id', window.CW_SESSION.matchId);
+        
+        _startTurn();
+     }
+  }
 }
 
 async function _addMass(row, col, color) {
@@ -273,7 +334,7 @@ async function _explode(row, col, color) {
   }
 }
 
-// ⚡ LÓGICA DEL BOT (Se mantiene igual, inteligente 100% legal)
+// LÓGICA DEL BOT (Se mantiene la IA Estratégica Legal)
 function _botMove() {
   const board = window.CW_SESSION.board;
   const humanWinsNext = window.CW_SESSION.humanWinsNext; 
@@ -348,18 +409,17 @@ function _checkGameOver() {
   }
   
   if (_turnCount >= 2) {
-     const myColor = window.CW_SESSION.myColor || 'pink';
-     
      if (pink === 0 && blue > 0) { _finishGame('blue'); return true; }
      if (blue === 0 && pink > 0) { _finishGame('pink'); return true; }
   }
   return false;
 }
 
-async function _finishGame(winnerColor) {
+async function _finishGame(winnerColor, fromDB = false) {
   _active = false;
   clearInterval(_turnTimer);
-  if (_matchChannel) _matchChannel.unsubscribe(); // Desconectar cable
+  clearInterval(_graceTimer);
+  if (_matchChannel) _matchChannel.unsubscribe();
   
   const myColor = window.CW_SESSION.myColor || 'pink';
   const win = winnerColor === myColor;
@@ -378,12 +438,17 @@ async function _finishGame(winnerColor) {
       await sb.from('users').update({ losses: newLosses }).eq('id', profile.id);
       setProfile({ ...profile, losses: newLosses });
     }
+
+    // ⚡ SOLO EL GANADOR actualiza la base de datos (para no cruzar cables)
+    if (win && !fromDB && !window.CW_SESSION.isBotMatch) {
+       await sb.from('matches').update({ status: 'finished', winner: myColor }).eq('id', window.CW_SESSION.matchId);
+    }
   } catch (e) {}
 
   _$container.innerHTML += `
     <div class="result-screen">
       <h1 class="result-title ${win ? 'result-win' : 'result-lose'}">${win ? '¡VICTORIA!' : 'DERROTA'}</h1>
-      <p style="color:var(--text-dim);font-family:var(--font-mono);margin-bottom:2rem;">${win ? '+320 Bs acreditados' : 'Te masacraron'}</p>
+      <p style="color:var(--text-dim);font-family:var(--font-mono);margin-bottom:2rem;">${win ? '+320 Bs acreditados' : 'Perdiste la batalla'}</p>
       <button class="btn btn-primary" id="btn-exit">VOLVER AL INICIO</button>
     </div>
   `;
