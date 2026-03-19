@@ -400,6 +400,7 @@ function openWithdrawModal() {
   document.getElementById('btn-wd-submit')?.addEventListener('click', submitWithdraw);
 }
 
+// ⚡ FUNCIÓN DE RETIRO BLINDADA (Descuenta saldo y guarda en Supabase)
 async function submitWithdraw() {
   const amount = parseFloat(document.getElementById('wd-amount')?.value);
   const bank   = document.getElementById('wd-bank')?.value.trim();
@@ -407,25 +408,53 @@ async function submitWithdraw() {
   const ci     = document.getElementById('wd-ci')?.value.trim();
   const $err   = document.getElementById('wd-err');
   const $btn   = document.getElementById('btn-wd-submit');
-  const bs     = getWalletBs();
+  
+  const profile = getProfile();
+  const bs = Number(profile.wallet_bs);
 
   $err.textContent = '';
 
   if (isNaN(amount) || amount <= 0)  { $err.textContent = 'Monto inválido.'; return; }
-  if (amount > bs)                    { $err.textContent = `Saldo insuficiente. Tienes ${bs.toLocaleString('es-VE')} Bs.`; return; }
-  if (!bank)                          { $err.textContent = 'Ingresa el banco.'; return; }
-  if (!phone)                         { $err.textContent = 'Ingresa el teléfono.'; return; }
-  if (!ci)                            { $err.textContent = 'Ingresa la cédula.'; return; }
+  if (amount > bs)                   { $err.textContent = `Saldo insuficiente. Tienes ${bs.toLocaleString('es-VE')} Bs.`; return; }
+  if (!bank)                         { $err.textContent = 'Ingresa el banco.'; return; }
+  if (!phone)                        { $err.textContent = 'Ingresa el teléfono.'; return; }
+  if (!ci)                           { $err.textContent = 'Ingresa la cédula.'; return; }
 
   $btn.disabled = true; $btn.textContent = 'PROCESANDO…'; $btn.style.opacity = '.65';
 
-  // For now: log request + show toast (no dedicated withdrawals table in spec)
-  // In production: insert to a 'withdrawals' table and admin processes it
-  await new Promise(r => setTimeout(r, 700));
+  const sb = getSupabase();
 
-  $btn.disabled = false; $btn.textContent = 'SOLICITAR RETIRO'; $btn.style.opacity = '1';
-  hideModal();
-  showToast(`Solicitud de retiro de ${amount.toLocaleString('es-VE')} Bs recibida. Procesaremos tu pago móvil pronto.`, 'info', 6000);
+  try {
+    // 1. DESCONTAMOS EL SALDO INMEDIATAMENTE para evitar doble cobro
+    const newBalance = bs - amount;
+    const { error: updateErr } = await sb.from('users').update({ wallet_bs: newBalance }).eq('id', profile.id);
+    if (updateErr) throw updateErr;
+
+    // 2. GUARDAMOS EL RECIBO EN SUPABASE
+    const { error: insertErr } = await sb.from('withdrawals').insert({
+      user_email: profile.email,
+      amount_bs: amount,
+      bank: bank,
+      phone: phone,
+      ci: ci,
+      status: 'pending'
+    });
+    if (insertErr) throw insertErr;
+
+    // 3. ÉXITO: Limpiamos la pantalla y avisamos
+    hideModal();
+    showToast(`Retiro de ${amount.toLocaleString('es-VE')} Bs en proceso.`, 'info', 6000);
+    
+    // Recargamos el perfil globalmente y repintamos el dashboard
+    await reloadProfile();
+    setView('dashboard');
+
+  } catch (error) {
+    console.error("Error en retiro:", error);
+    $err.textContent = 'Error procesando el retiro. Intenta de nuevo.';
+  } finally {
+    $btn.disabled = false; $btn.textContent = 'SOLICITAR RETIRO'; $btn.style.opacity = '1';
+  }
 }
 
 // ── Donut SVG ─────────────────────────────────────────
