@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/core/app.js
- * SPA Router + UI Core (Efecto Brillo Logo + Limpieza Bs)
+ * SPA Router + UI Core (Efecto Brillo LENTO y ELEGANTE)
  * ═══════════════════════════════════════════════════════
  */
 
@@ -13,7 +13,7 @@ import {
   getWalletBs, getWalletUSD,
 } from './state.js';
 
-// ── INYECCIÓN DEL EFECTO BRILLO PARA EL LOGO ───────────
+// ── INYECCIÓN DEL EFECTO BRILLO PARA EL LOGO (LENTO Y PREMIUM) ──
 const style = document.createElement('style');
 style.innerHTML = `
   #header-title {
@@ -31,12 +31,13 @@ style.innerHTML = `
     height: 100%;
     background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.8), transparent);
     transform: skewX(-25deg);
-    animation: logo-shine 3.5s infinite;
+    /* 6 segundos en total para que no maree */
+    animation: logo-shine 6s ease-in-out infinite; 
   }
   @keyframes logo-shine {
     0% { left: -150%; }
-    15% { left: 150%; }
-    100% { left: 150%; }
+    40% { left: 150%; } /* Se toma su tiempo cruzando las letras suavemente */
+    100% { left: 150%; } /* Descansa un rato antes de volver a brillar */
   }
 `;
 document.head.appendChild(style);
@@ -186,7 +187,7 @@ function updateHeader(viewKey) {
 
   const profile = getProfile();
 
-  // 🔥 CIRUGÍA: OCULTAMOS Y VACIAR LA BILLETERA DE BS/USD DEL HEADER PARA SIEMPRE
+  // 🔥 OCULTAMOS LA BILLETERA VIEJA DEL HEADER
   $headerWallet.classList.add('hidden');
   $headerWallet.innerHTML = '';
 
