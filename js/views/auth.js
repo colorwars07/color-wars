@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/views/auth.js
- * Auth: Login · Register · Reset Password (Blindado)
+ * Auth: Login · Register · Reset Password (REDRECCIÓN 10/10)
  * ═══════════════════════════════════════════════════════
  */
 
@@ -156,7 +156,7 @@ async function handleLogin($c) {
   }
 }
 
-// ── Register (Blindado) ──────────────────────────────
+// ── Register (CON REDIRECCIÓN FIJA) ───────────────────
 async function handleRegister($c) {
   clearErrors($c);
   const email   = $c.querySelector('#reg-email').value.trim();
@@ -176,10 +176,15 @@ async function handleRegister($c) {
   setBtnLoading($btn, true, 'CREANDO…');
   const sb = getSupabase();
 
+  // 🚀 INYECCIÓN DE REDIRECCIÓN AQUÍ:
   const { data: authData, error: authErr } = await sb.auth.signUp({
     email,
     password: pass,
-    options: { data: { username: user } },
+    options: { 
+      data: { username: user },
+      // Esto asegura que al confirmar el correo, el chamo caiga en el Login
+      emailRedirectTo: 'https://colorwars-mu.vercel.app/#auth' 
+    },
   });
 
   if (authErr) {
@@ -211,7 +216,7 @@ async function handleRegister($c) {
   }
 
   setBtnLoading($btn, false, 'CREAR CUENTA');
-  showToast(`¡Cuenta creada! Bienvenido, ${escHtml(user)}.`, 'success');
+  showToast(`¡Cuenta creada! Revisa tu correo para confirmar.`, 'success', 6000);
 }
 
 // ── Forgot Password ────────────────────────────────────
@@ -229,7 +234,8 @@ async function handleForgot($c) {
   const sb = getSupabase();
 
   const { error } = await sb.auth.resetPasswordForEmail(email, {
-    redirectTo: `${window.location.origin}/index.html?reset=1`,
+    // Redirección para recuperación de contraseña
+    redirectTo: 'https://colorwars-mu.vercel.app/#auth',
   });
 
   setBtnLoading($btn, false, '¿Olvidaste tu contraseña?');
@@ -237,11 +243,11 @@ async function handleForgot($c) {
   if (error) {
     showToast('Error al enviar el correo. Intenta de nuevo.', 'error');
   } else {
-    showToast('Revisa tu bandeja de entrada. Te enviamos el enlace de recuperación.', 'success', 6000);
+    showToast('Revisa tu bandeja de entrada para recuperar tu acceso.', 'success', 6000);
   }
 }
 
-// ── Helpers ────────────────────────────────────────────
+// ── Helpers (NO TOCAR) ──────────────────────────────────
 function showErr($c, id, msg) { const $el = $c.querySelector(`#${id}`); if ($el) $el.textContent = msg; }
 function clearErrors($c) { $c.querySelectorAll('.field-error').forEach($e => { $e.textContent = ''; }); }
 function setBtnLoading($btn, loading, label) {
