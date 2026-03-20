@@ -1,12 +1,13 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/game/board.js
- * MONOLITO: MULTIJUGADOR + ECONOMÍA BLINDADA EN SERVIDOR
+ * MONOLITO: MULTIJUGADOR + ESCÁNER DE ERRORES + SALIDA FORZADA
  * ═══════════════════════════════════════════════════════
  */
 
 import { registerView, showToast } from '../core/app.js';
-import { setView, getProfile, setProfile } from '../core/state.js';
+// ⚡ IMPORTACIÓN ESTÁTICA CORREGIDA (Evita que el botón se congele)
+import { setView, getProfile, setProfile, reloadProfile } from '../core/state.js';
 import { getSupabase } from '../core/supabase.js';
 
 const BOARD_SIZE = 5;
@@ -406,7 +407,7 @@ function _checkGameOver() {
   return false;
 }
 
-// ⚡ LÓGICA BLINDADA: EL SERVIDOR PAGA EL PREMIO AUTOMÁTICAMENTE
+// ⚡ LÓGICA BLINDADA
 async function _finishGame(winnerColor, fromDB = false) {
   if (!_active) return; 
   _active = false;
@@ -422,7 +423,6 @@ async function _finishGame(winnerColor, fromDB = false) {
     const profile = getProfile();
     const sb = getSupabase();
 
-    // 1. EL TELÉFONO LE AVISA A SUPABASE QUE ALGUIEN GANÓ (Esto activa el Perro Guardián SQL)
     if (!fromDB && !window.CW_SESSION.isBotMatch && window.CW_SESSION.matchId) {
        await sb.from('matches').update({ 
            status: 'finished', 
@@ -431,7 +431,6 @@ async function _finishGame(winnerColor, fromDB = false) {
        }).eq('id', window.CW_SESSION.matchId);
     }
     
-    // 2. SI ES CONTRA EL BOT (que no usa servidor), EL TELÉFONO HACE LA MATEMÁTICA
     if (window.CW_SESSION.isBotMatch) {
        if (win) {
          const newBalance = Number(profile.wallet_bs) + 320;
@@ -452,15 +451,32 @@ async function _finishGame(winnerColor, fromDB = false) {
         ${win ? '+320 Bs acreditados' : 'Perdiste la batalla'}
       </p>
       <button class="btn btn-primary" id="btn-exit" style="width:200px;">VOLVER AL INICIO</button>
+      <p id="board-error-log" style="color:#ff4444; font-size:0.8rem; margin-top:15px; text-align:center; max-width:80%; font-family:var(--font-mono);"></p>
     </div>
   `;
   
+  // ⚡ BOTÓN DE SALIDA BLINDADO CON ESCÁNER DE ERRORES Y SALIDA FORZADA
   _$container.querySelector('#btn-exit').addEventListener('click', async () => {
-    window.CW_SESSION = null; 
+    const $btn = _$container.querySelector('#btn-exit');
+    const $err = _$container.querySelector('#board-error-log');
     
-    // ⚡ OBLIGAMOS AL JUEGO A DESCARGAR EL SALDO NUEVO DESDE SUPABASE AL VOLVER AL INICIO
-    const { reloadProfile } = await import('../core/state.js');
-    await reloadProfile();
-    setView('dashboard');
+    try {
+      $btn.textContent = "SALIENDO...";
+      $btn.style.opacity = "0.7";
+      $btn.style.pointerEvents = "none";
+      
+      window.CW_SESSION = null; 
+      
+      // Intentamos recargar el perfil desde Supabase para actualizar la billetera
+      await reloadProfile(); 
+      setView('dashboard');
+
+    } catch (error) {
+      console.error("Error saliendo al inicio:", error);
+      if ($err) $err.innerHTML = `⚠️ Falla detectada: ${error.message}<br>Forzando salida en 2s...`;
+      
+      // Si todo falla, forzamos la salida al Dashboard sí o sí en 2 segundos
+      setTimeout(() => { setView('dashboard'); }, 2000);
+    }
   });
 }
