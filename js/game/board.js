@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/game/board.js
- * CEREBRO GRAN MAESTRO (Geometría Corregida: Todo explota en 4)
+ * CEREBRO MINIMAX (Simulador de Futuros y Cadenas)
  * ═══════════════════════════════════════════════════════
  */
 
@@ -175,7 +175,7 @@ function _startTurn() {
       setTimeout(() => {
         if (!_active || _currentTurn !== botColor) return;
         _botMove();
-      }, 800 + Math.random() * 500); 
+      }, 700 + Math.random() * 500); 
     }
   }
 }
@@ -239,8 +239,6 @@ async function _explode(row, col, color) {
   window.CW_SESSION.board[row][col].mass = 0; window.CW_SESSION.board[row][col].owner = null; 
   updateDOM();
 
-  // El sistema YA asume que se pierden esquirlas si explota en un borde/esquina, 
-  // porque solo empuja a los vecinos válidos.
   const neighbors = [];
   if (row > 0) neighbors.push({row: row - 1, col});
   if (row < BOARD_SIZE - 1) neighbors.push({row: row + 1, col});
@@ -255,117 +253,142 @@ async function _explode(row, col, color) {
   }
 }
 
-// 🧠 CEREBRO GRAN MAESTRO (Entiende que Todo Explota en 4)
+// ═════════════════════════════════════════════════════════
+// 🧠 MOTOR MINIMAX (SIMULADOR DE FUTURO Y REACCIONES EN CADENA)
+// ═════════════════════════════════════════════════════════
+
+// Clonar el tablero en la mente del Bot
+function _cloneBoard(board) {
+  return board.map(row => row.map(cell => ({ owner: cell.owner, mass: cell.mass })));
+}
+
+// Conseguir los movimientos legales de un color
+function _getValidMoves(board, color) {
+  let moves = [];
+  let hasCells = false;
+  for (let r=0; r<BOARD_SIZE; r++) {
+    for (let c=0; c<BOARD_SIZE; c++) {
+      if (board[r][c].owner === color) hasCells = true;
+    }
+  }
+  for (let r=0; r<BOARD_SIZE; r++) {
+    for (let c=0; c<BOARD_SIZE; c++) {
+      if (hasCells) {
+        if (board[r][c].owner === color) moves.push({r, c});
+      } else {
+        if (!board[r][c].owner) moves.push({r, c});
+      }
+    }
+  }
+  return moves;
+}
+
+// Simular CÓMO EXPLOTARÍA el tablero mentalmente en un milisegundo
+function _simulateMove(board, r, c, color) {
+  let temp = _cloneBoard(board);
+  let queue = [{r, c, color}];
+  let iterations = 0;
+
+  while(queue.length > 0 && iterations < 300) {
+    iterations++;
+    let current = queue.shift();
+    let cell = temp[current.r][current.c];
+
+    cell.owner = current.color;
+    cell.mass++;
+
+    if (cell.mass >= 4) {
+      cell.mass = 0;
+      cell.owner = null;
+      if (current.r > 0) queue.push({r: current.r - 1, c: current.c, color: current.color});
+      if (current.r < 4) queue.push({r: current.r + 1, c: current.c, color: current.color});
+      if (current.c > 0) queue.push({r: current.r, c: current.c - 1, color: current.color});
+      if (current.c < 4) queue.push({r: current.r, c: current.c + 1, color: current.color});
+    }
+  }
+  return temp;
+}
+
+// Evaluar quién va ganando en ese tablero imaginario
+function _evaluateBoard(board, botColor, enemyColor) {
+  let botScore = 0;
+  let enemyScore = 0;
+  for (let r=0; r<BOARD_SIZE; r++) {
+    for (let c=0; c<BOARD_SIZE; c++) {
+      let cell = board[r][c];
+      if (cell.owner === botColor) {
+        botScore += (cell.mass * 10);
+        if (cell.mass === 3) botScore += 50; // Valora las bombas listas
+      } else if (cell.owner === enemyColor) {
+        enemyScore += (cell.mass * 10);
+        if (cell.mass === 3) enemyScore += 50;
+      }
+    }
+  }
+  if (botScore > 0 && enemyScore === 0) return 999999; // Win instantáneo
+  if (enemyScore > 0 && botScore === 0) return -999999; // Muerte instantánea
+  return botScore - enemyScore;
+}
+
 function _botMove() {
   try {
     const board = window.CW_SESSION.board;
     const enemyColor = window.CW_SESSION.myColor;
     const botColor = enemyColor === 'pink' ? 'blue' : 'pink'; 
-    const validMoves = [];
 
-    // 1. Contar fichas y determinar movimientos legales
-    let botCellsCount = 0;
-    for (let r = 0; r < BOARD_SIZE; r++) {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        if (board[r][c].owner === botColor) botCellsCount++;
-      }
-    }
-
-    for (let r = 0; r < BOARD_SIZE; r++) {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        if (botCellsCount > 0) {
-            if (board[r][c].owner === botColor) validMoves.push({ r, c, mass: board[r][c].mass, owner: botColor });
-        } else {
-            if (!board[r][c].owner) validMoves.push({ r, c, mass: 0, owner: null });
-        }
-      }
-    }
-
+    let validMoves = _getValidMoves(board, botColor);
     if (validMoves.length === 0) { _passTurn(); return; }
 
-    // 2. LA EVALUACIÓN MENTAL: Geometría real de tu juego
+    // Si es su primerísimo turno y el centro está vacío, atrápalo
+    if (validMoves.length === 25 && !board[2][2].owner) {
+      _addMass(2, 2, botColor); return;
+    }
+
     let bestMove = null;
     let bestScore = -Infinity;
 
     for (const move of validMoves) {
-      let r = move.r; 
-      let c = move.c;
-      let score = 0;
+      // 1. Simula SU propio movimiento
+      let simBoard1 = _simulateMove(board, move.r, move.c, botColor);
 
-      // ♟️ TÁCTICA 1: La Geometría Brutal
-      let isCorner = (r===0 && c===0) || (r===0 && c===4) || (r===4 && c===0) || (r===4 && c===4);
-      let isEdge = r===0 || r===4 || c===0 || c===4;
-      
-      // En tu juego el CENTRO es el rey (4 de 4 impactos). Las esquinas son la peor trampa (2 de 4 impactos).
-      if (!isEdge && !isCorner) {
-          score += 40; // El centro es jugoso
-      } else if (isEdge && !isCorner) {
-          score += 10; // Los bordes están bien
-      } else if (isCorner) {
-          score -= 20; // Huir de las esquinas, son un desperdicio de puntos
+      // Si este movimiento aniquila al jugador de una vez (y no es el turno 1), TÓMALO SIN PENSAR
+      let eval1 = _evaluateBoard(simBoard1, botColor, enemyColor);
+      if (eval1 > 900000 && _turnCount >= 2) {
+         _addMass(move.r, move.c, botColor);
+         return;
       }
 
-      // ♟️ TÁCTICA 2: El Armado de la Trampa (Todo necesita 4 para explotar)
-      // Por ende, el nivel de peligro inminente siempre es 3.
-      if (move.mass === 3) {
-          score += 150; // ¡Bomba lista para detonar!
-      } else if (move.mass === 2) {
-          score += 50;
-      } else if (move.mass === 1) {
-          score += 10;
+      // 2. Simula TODAS LAS RESPUESTAS POSIBLES que tú (el enemigo) podrías hacerle
+      let enemyMoves = _getValidMoves(simBoard1, enemyColor);
+      let worstCaseScore = Infinity;
+
+      for (const eMove of enemyMoves) {
+         let simBoard2 = _simulateMove(simBoard1, eMove.r, eMove.c, enemyColor);
+         let eval2 = _evaluateBoard(simBoard2, botColor, enemyColor);
+         
+         // El Bot asume que tú eres inteligentísimo y que elegirás la jugada que más daño le haga
+         if (eval2 < worstCaseScore) {
+             worstCaseScore = eval2; 
+         }
       }
 
-      // ♟️ TÁCTICA 3: Escáner de Amenazas a Muerte
-      const neighbors = [ {rr: r-1, cc: c}, {rr: r+1, cc: c}, {rr: r, cc: c-1}, {rr: r, cc: c+1} ];
-      let dangerZone = 0;
-      let attackPotential = 0;
+      // Si después de su movimiento, a ti no te quedan fichas, él ya ganó
+      if (enemyMoves.length === 0) worstCaseScore = 999999;
 
-      for (const n of neighbors) {
-        if (n.rr >= 0 && n.rr < BOARD_SIZE && n.cc >= 0 && n.cc < BOARD_SIZE) {
-          const neighbor = board[n.rr][n.cc];
-          
-          if (neighbor.owner === enemyColor) {
-            // El enemigo está en nivel 3: ¡ES LETAL! (Porque necesita 4 para explotar)
-            if (neighbor.mass === 3) { 
-                
-                if (move.mass === 3) {
-                    // ¡JAQUE MATE! Yo exploto primero, gano la cadena y le robo su bomba.
-                    score += 10000; 
-                } else if (move.mass === 2) {
-                    // DEFENSA PSICOLÓGICA: Lo subo a 3 para amenazarlo en la cara y forzarlo.
-                    score += 4000;
-                } else {
-                    // PELIGRO: Si pongo una ficha aquí y no lo puedo amenazar, me la va a robar en su turno.
-                    dangerZone -= 5000; 
-                }
-            } else if (neighbor.mass === 2) {
-                // El enemigo está armando la trampa. Lo presiono.
-                if (move.mass === 3) attackPotential += 1000; // Si lo exploto, me llevo su 2 de gratis.
-                else attackPotential += 50; 
-            } else {
-                attackPotential += 20; // Comer morralla siempre es útil.
-            }
+      // Un toque micro-aleatorio para que no juegue como un robot aburrido
+      worstCaseScore += Math.random();
 
-          } else if (neighbor.owner === botColor) {
-            // Sinergia: Mis propias fichas cerca potencian mis reacciones en cadena
-            attackPotential += 15;
-          }
-        }
-      }
-
-      score += dangerZone + attackPotential;
-
-      // Factor aleatorio mínimo para que no repita exactamente el mismo partido 2 veces
-      score += Math.random() * 5;
-
-      if (score > bestScore) {
-        bestScore = score;
-        bestMove = move;
+      // El Bot elige el camino donde TU MEJOR RESPUESTA sea la menos dolorosa para él
+      if (worstCaseScore > bestScore) {
+         bestScore = worstCaseScore;
+         bestMove = move;
       }
     }
 
-    if (bestMove) { _addMass(bestMove.r, bestMove.c, botColor); } else { _passTurn(); }
-  } catch (err) { console.error("Error en IA Maestro:", err); _passTurn(); }
+    if (bestMove) { _addMass(bestMove.r, bestMove.c, botColor); } 
+    else { _addMass(validMoves[0].r, validMoves[0].c, botColor); } // Seguro
+
+  } catch (err) { console.error("Error en Motor Cuántico:", err); _passTurn(); }
 }
 
 function _checkGameOver() {
