@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/game/board.js
- * MONOLITO: MULTIJUGADOR + FIN DE BUCLE INFINITO
+ * MONOLITO: MULTIJUGADOR + ECONOMÍA BLINDADA EN SERVIDOR
  * ═══════════════════════════════════════════════════════
  */
 
@@ -406,7 +406,7 @@ function _checkGameOver() {
   return false;
 }
 
-// ⚡ LÓGICA BLINDADA: AHORA SÍ CIERRA EL BUCLE DEL BOT Y DEL HUMANO
+// ⚡ LÓGICA BLINDADA: EL SERVIDOR PAGA EL PREMIO AUTOMÁTICAMENTE
 async function _finishGame(winnerColor, fromDB = false) {
   if (!_active) return; 
   _active = false;
@@ -422,9 +422,8 @@ async function _finishGame(winnerColor, fromDB = false) {
     const profile = getProfile();
     const sb = getSupabase();
 
-    // 🔥 LA SOLUCIÓN: Quitamos el candado que ignoraba al Bot. 
-    // Ahora le avisa a Supabase que TODO terminó.
-    if (!fromDB && window.CW_SESSION.matchId) {
+    // 1. EL TELÉFONO LE AVISA A SUPABASE QUE ALGUIEN GANÓ (Esto activa el Perro Guardián SQL)
+    if (!fromDB && !window.CW_SESSION.isBotMatch && window.CW_SESSION.matchId) {
        await sb.from('matches').update({ 
            status: 'finished', 
            winner: winnerColor,
@@ -432,15 +431,16 @@ async function _finishGame(winnerColor, fromDB = false) {
        }).eq('id', window.CW_SESSION.matchId);
     }
     
-    if (win) {
-      const newBalance = Number(profile.wallet_bs) + 320;
-      const newWins = (profile.wins || 0) + 1;
-      await sb.from('users').update({ wallet_bs: newBalance, wins: newWins }).eq('id', profile.id);
-      setProfile({ ...profile, wallet_bs: newBalance, wins: newWins });
-    } else {
-      const newLosses = (profile.losses || 0) + 1;
-      await sb.from('users').update({ losses: newLosses }).eq('id', profile.id);
-      setProfile({ ...profile, losses: newLosses });
+    // 2. SI ES CONTRA EL BOT (que no usa servidor), EL TELÉFONO HACE LA MATEMÁTICA
+    if (window.CW_SESSION.isBotMatch) {
+       if (win) {
+         const newBalance = Number(profile.wallet_bs) + 320;
+         const newWins = (profile.wins || 0) + 1;
+         await sb.from('users').update({ wallet_bs: newBalance, wins: newWins }).eq('id', profile.id);
+       } else {
+         const newLosses = (profile.losses || 0) + 1;
+         await sb.from('users').update({ losses: newLosses }).eq('id', profile.id);
+       }
     }
 
   } catch (e) { console.error("Error al finalizar:", e); }
@@ -455,8 +455,12 @@ async function _finishGame(winnerColor, fromDB = false) {
     </div>
   `;
   
-  _$container.querySelector('#btn-exit').addEventListener('click', () => {
+  _$container.querySelector('#btn-exit').addEventListener('click', async () => {
     window.CW_SESSION = null; 
+    
+    // ⚡ OBLIGAMOS AL JUEGO A DESCARGAR EL SALDO NUEVO DESDE SUPABASE AL VOLVER AL INICIO
+    const { reloadProfile } = await import('../core/state.js');
+    await reloadProfile();
     setView('dashboard');
   });
 }
