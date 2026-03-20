@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/views/dashboard.js
- * Player Dashboard: wallet, recharge, withdraw, battle
+ * TIENDA ÉLITE COLOR-POINS (CP) + ECONOMÍA BLINDADA
  * ═══════════════════════════════════════════════════════
  */
 
@@ -29,6 +29,8 @@ export async function initDashboardView($container) {
     if (isReconnected) return; 
   }
 
+  // Inyectamos los estilos de la Tienda de Cristales
+  injectStoreStyles();
   render($container);
 
   _unsubs.push(subscribe('profile', () => render($container)));
@@ -66,12 +68,44 @@ async function checkActiveMatch(profile) {
   return false; 
 }
 
+function injectStoreStyles() {
+  if (document.getElementById('cw-store-styles')) return;
+  const style = document.createElement('style');
+  style.id = 'cw-store-styles';
+  style.innerHTML = `
+    .cp-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; margin-top: 15px; margin-bottom: 15px; }
+    .cp-card {
+      background: linear-gradient(145deg, #11111a, #1a1a2e);
+      border: 1px solid var(--border-ghost);
+      border-radius: 15px; padding: 15px 10px; text-align: center;
+      cursor: pointer; position: relative; overflow: hidden;
+      transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1);
+      box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+    }
+    .cp-card:hover, .cp-card:active { transform: translateY(-4px) scale(1.03); border-color: var(--card-color); box-shadow: 0 0 20px var(--card-color) inset, 0 10px 20px rgba(0,0,0,0.8); }
+    .cp-crystal {
+      font-size: 2.8rem; margin-bottom: 10px; display: inline-block;
+      animation: float 3s ease-in-out infinite;
+      filter: drop-shadow(0 0 12px var(--card-color));
+    }
+    .cp-amount { font-family: var(--font-display); font-size: 1.3rem; font-weight: 900; color: white; letter-spacing: 1px; }
+    .cp-price { 
+      font-family: var(--font-mono); font-size: 0.8rem; color: #fff; background: var(--card-color); 
+      padding: 4px 10px; border-radius: 8px; display: inline-block; margin-top: 8px; font-weight: bold;
+      text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+    }
+    @keyframes float { 0% { transform: translateY(0); } 50% { transform: translateY(-8px); } 100% { transform: translateY(0); } }
+    .cp-logo-text { background: -webkit-linear-gradient(45deg, #00f0ff, #ff00ff); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+  `;
+  document.head.appendChild(style);
+}
+
 function render($c) {
   const profile = getProfile();
   if (!profile) { setView('auth'); return; }
 
-  const bs    = getWalletBs();
-  const usd   = getWalletUSD().toFixed(2);
+  // LA BILLETERA AHORA ES EN COLOR-POINS (CP)
+  const cpBalance = Number(profile.wallet_bs || 0); 
   const rate  = getBcvRate();
   const wins  = profile.wins   ?? 0;
   const losses = profile.losses ?? 0;
@@ -81,26 +115,28 @@ function render($c) {
   $c.innerHTML = `
   <div class="dash-grid">
 
-    <div class="wallet-card card-acc" style="grid-column:1/-1;">
+    <div class="wallet-card card-acc" style="grid-column:1/-1; background: linear-gradient(145deg, #0f0c29, #302b63, #24243e); border: 1px solid #4c1d95;">
       <div style="display:flex;align-items:flex-start;justify-content:space-between;flex-wrap:wrap;gap:.85rem;">
         <div>
-          <p class="wallet-label">💰 Billetera</p>
-          <div class="wallet-amount">${bs.toLocaleString('es-VE')} <span style="font-size:.9rem;color:var(--blue);font-family:var(--font-mono);">Bs</span></div>
-          <p class="wallet-usd">≈ $${usd} USD · Tasa BCV: <span style="color:#ffaa00;">${rate} Bs/$</span></p>
+          <p class="wallet-label" style="color:#00f0ff;">💎 Billetera Élite</p>
+          <div class="wallet-amount" style="text-shadow: 0 0 10px rgba(0,240,255,0.5);">
+            ${cpBalance.toLocaleString('es-VE')} <span style="font-size:1.1rem;color:#00f0ff;font-family:var(--font-display); font-weight:bold;">CP</span>
+          </div>
+          <p class="wallet-usd" style="color:var(--text-dim);">Color-Poins Disponibles</p>
         </div>
         <div style="display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;">
-          <button id="btn-recharge" class="btn btn-neon" style="font-size:.68rem;">
-            ${iconPlus()} RECARGAR
+          <button id="btn-recharge" class="btn btn-neon" style="font-size:.68rem; background: linear-gradient(90deg, #00f0ff, #0055ff); border:none; color:white;">
+            🛒 COMPRAR CP
           </button>
-          <button id="btn-withdraw" class="btn btn-ghost" style="font-size:.68rem;">
-            ${iconArrow()} RETIRAR
+          <button id="btn-withdraw" class="btn btn-ghost" style="font-size:.68rem; border-color:#ff00ff; color:#ff00ff;">
+            🔄 CANJEAR
           </button>
         </div>
       </div>
     </div>
 
     <div class="card card-acc">
-      <p style="font-family:var(--font-mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);margin-bottom:.9rem;">📊 Estadísticas</p>
+      <p style="font-family:var(--font-mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);margin-bottom:.9rem;">📊 Récord de Batalla</p>
       <div class="donut-wrap">
         ${buildDonut(winPct)}
         <div style="display:flex;flex-direction:column;gap:.45rem;width:100%;">
@@ -115,23 +151,23 @@ function render($c) {
     </div>
 
     <div class="card card-acc" id="lb-card">
-      <p style="font-family:var(--font-mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);margin-bottom:.9rem;">🏆 Top 10</p>
+      <p style="font-family:var(--font-mono);font-size:.62rem;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);margin-bottom:.9rem;">🏆 Top Leyendas</p>
       <div id="lb-body" style="font-family:var(--font-mono);font-size:.7rem;color:var(--text-dim);">Cargando…</div>
     </div>
 
-    <div class="card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1rem;padding:1.75rem 1.25rem;background:linear-gradient(135deg,var(--surface-1),var(--surface-2));border-color:var(--border-active);">
+    <div class="card" style="display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1rem;padding:1.75rem 1.25rem;background:linear-gradient(135deg,#2e0854,#0b0f19);border-color:#6d28d9; box-shadow: 0 0 20px rgba(109, 40, 217, 0.3);">
       <div style="text-align:center;">
-        <p style="font-family:var(--font-display);font-size:.68rem;letter-spacing:.18em;color:var(--text-dim);text-transform:uppercase;margin-bottom:.2rem;">
-          Entrada: <span style="color:var(--pink);">${ECONOMY.ENTRY_FEE_BS} Bs</span>
+        <p style="font-family:var(--font-display);font-size:.75rem;letter-spacing:.18em;color:var(--text-bright);text-transform:uppercase;margin-bottom:.2rem;">
+          Costo de Entrada: <span style="color:#00f0ff; text-shadow: 0 0 5px #00f0ff;">200 CP</span>
         </p>
-        <p style="font-family:var(--font-mono);font-size:.6rem;color:var(--text-ghost);">
-          Premio si ganas: ${ECONOMY.WINNER_PRIZE_BS} Bs
+        <p style="font-family:var(--font-mono);font-size:.65rem;color:var(--pink);">
+          Premio al Ganador: 320 CP
         </p>
       </div>
-      <button id="btn-battle" class="btn btn-battle" ${bs < ECONOMY.ENTRY_FEE_BS ? 'disabled' : ''}>
-        ⚔ BUSCAR BATALLA
+      <button id="btn-battle" class="btn btn-battle" style="background:#ff00ff; box-shadow: 0 0 15px #ff00ff;" ${cpBalance < 200 ? 'disabled' : ''}>
+        ⚔ ENTRAR A LA ARENA
       </button>
-      ${bs < ECONOMY.ENTRY_FEE_BS ? `<p style="font-family:var(--font-mono);font-size:.62rem;color:var(--pink);text-align:center;">Saldo insuficiente. Recarga tu billetera.</p>` : ''}
+      ${cpBalance < 200 ? `<p style="font-family:var(--font-mono);font-size:.62rem;color:#ff4444;text-align:center;">Insuficientes CP. Ve a la tienda.</p>` : ''}
     </div>
 
   </div>`;
@@ -151,11 +187,12 @@ function statRow(label, val, color, glow) {
 }
 
 function attachEvents($c) {
-  $c.querySelector('#btn-recharge')?.addEventListener('click', openRechargeModal);
+  $c.querySelector('#btn-recharge')?.addEventListener('click', openStoreModal);
   $c.querySelector('#btn-withdraw')?.addEventListener('click', openWithdrawModal);
   $c.querySelector('#btn-battle')?.addEventListener('click',   () => {
-    if (getWalletBs() < ECONOMY.ENTRY_FEE_BS) {
-      showToast(`Necesitas ${ECONOMY.ENTRY_FEE_BS} Bs para jugar.`, 'warning');
+    const profile = getProfile();
+    if (Number(profile.wallet_bs) < 200) {
+      showToast(`Necesitas 200 CP para jugar.`, 'warning');
       return;
     }
     setView('matchmaking');
@@ -164,22 +201,11 @@ function attachEvents($c) {
 
 async function loadLeaderboard($c) {
   const sb = getSupabase();
-  const { data, error } = await sb
-    .from('users')
-    .select('username,wins,losses')
-    .order('wins', { ascending: false })
-    .limit(10);
-
+  const { data, error } = await sb.from('users').select('username,wins,losses').order('wins', { ascending: false }).limit(10);
   const $lb = $c.querySelector('#lb-body');
   if (!$lb) return;
-
-  if (error || !data?.length) {
-    $lb.innerHTML = `<p style="text-align:center;color:var(--text-ghost);padding:1rem 0;">Sin jugadores aún.</p>`;
-    return;
-  }
-
+  if (error || !data?.length) { $lb.innerHTML = `<p style="text-align:center;color:var(--text-ghost);padding:1rem 0;">Sin jugadores aún.</p>`; return; }
   const medals = ['🥇','🥈','🥉'];
-
   $lb.innerHTML = `
   <table class="lb-table">
     <thead><tr><th>#</th><th>Jugador</th><th>V</th><th>D</th><th>%</th></tr></thead>
@@ -198,78 +224,101 @@ async function loadLeaderboard($c) {
   </table>`;
 }
 
-function openRechargeModal() {
+// ⚡ LA NUEVA TIENDA ESTILO FREE FIRE
+function openStoreModal() {
   const rate = getBcvRate();
+  const packs = [
+    { cp: 50, usd: 0.50, color: '#00f0ff', name: 'CRISTAL BÁSICO', icon: '🔹' },
+    { cp: 100, usd: 1.00, color: '#00ff66', name: 'NÚCLEO VERDE', icon: '🔋' },
+    { cp: 300, usd: 3.00, color: '#ff00ff', name: 'PILA PÚRPURA', icon: '🔮' },
+    { cp: 500, usd: 5.00, color: '#ffaa00', name: 'COFRE NARANJA', icon: '🧰' },
+    { cp: 1000, usd: 10.00, color: '#ff0055', name: 'MATRIZ ROJA', icon: '💎' },
+    { cp: 1500, usd: 15.00, color: '#ffff00', name: 'TESORO LEYENDA', icon: '👑' }
+  ];
 
   showModal(`
     <button class="modal-close" onclick="window.__CW_hideModal()">✕</button>
-    <div class="modal-title">${iconCard()} RECARGAR BILLETERA</div>
-
-    <p style="font-family:var(--font-mono);font-size:.62rem;color:var(--text-dim);margin-bottom:.65rem;letter-spacing:.05em;">PASO 1 — Transfiere a esta cuenta:</p>
-    <div class="bank-box">
-      ${bankRow('Teléfono','04144708220')}
-      ${bankRow('Banco','Banco de Venezuela')}
-      ${bankRow('C.I.','30522091')}
+    <div class="modal-title" style="text-align:center; margin-bottom: 5px;">
+      <span class="cp-logo-text" style="font-size:1.5rem; font-weight:900; letter-spacing:2px;">TIENDA DE COLOR-POINS</span>
     </div>
+    <p style="text-align:center; font-family:var(--font-mono); font-size:0.65rem; color:var(--text-dim); margin-bottom:15px;">Adquiere CP para entrar a la arena</p>
 
-    <p style="font-family:var(--font-mono);font-size:.62rem;color:var(--text-dim);margin-bottom:.5rem;letter-spacing:.05em;">PASO 2 — Monto y referencia:</p>
-    <div class="field-group">
-      <label class="field-label" for="rc-amount">Monto en USD</label>
-      <input id="rc-amount" type="number" min="1" step="0.5" class="input-field" placeholder="Ej: 5.00" inputmode="decimal" />
-    </div>
-
-    <div class="calc-box" id="rc-calc" style="display:none;">
-      <div class="calc-rate">Tasa BCV: <span class="calc-rate-val">${rate} Bs/$</span></div>
-      <div style="display:flex;align-items:baseline;gap:.4rem;">
-        <span class="calc-result" id="rc-bs-result">0.00</span>
-        <span class="calc-result-label">Bolívares a recibir</span>
+    <div id="store-step-1">
+      <div class="cp-grid">
+        ${packs.map(p => `
+          <div class="cp-card pack-btn" data-cp="${p.cp}" data-usd="${p.usd}" style="--card-color: ${p.color};">
+            <div class="cp-crystal">${p.icon}</div>
+            <div style="font-family:var(--font-mono); font-size:0.55rem; color:var(--text-ghost); text-transform:uppercase;">${p.name}</div>
+            <div class="cp-amount">${p.cp} CP</div>
+            <div class="cp-price">USD $${p.usd.toFixed(2)}</div>
+          </div>
+        `).join('')}
       </div>
     </div>
 
-    <div class="field-group" style="margin-top:.85rem;">
-      <label class="field-label" for="rc-ref">Últimos 6 dígitos de la referencia</label>
-      <input id="rc-ref" type="text" class="input-field" placeholder="123456" maxlength="6" inputmode="numeric" />
+    <div id="store-step-2" style="display:none;">
+      <div style="background:rgba(0,240,255,0.1); border:1px solid #00f0ff; border-radius:10px; padding:15px; text-align:center; margin-bottom:15px;">
+        <p style="font-family:var(--font-display); color:white; margin-bottom:5px;">Paquete Seleccionado: <span id="sel-cp" style="color:#00f0ff; font-size:1.2rem;">0 CP</span></p>
+        <p style="font-family:var(--font-mono); font-size:0.75rem; color:var(--text-dim);">Debes transferir exactamente:</p>
+        <p style="font-family:var(--font-display); color:#ffaa00; font-size:1.5rem; margin-top:5px;" id="sel-bs">0.00 Bs</p>
+        <p style="font-family:var(--font-mono); font-size:0.6rem; color:var(--text-ghost);">(Tasa BCV: ${rate} Bs/$)</p>
+      </div>
+
+      <div class="bank-box" style="margin-bottom:15px;">
+        ${bankRow('Teléfono','04144708220')}
+        ${bankRow('Banco','Banco de Venezuela')}
+        ${bankRow('C.I.','30522091')}
+      </div>
+
+      <div class="field-group" style="margin-top:.85rem;">
+        <label class="field-label" for="rc-ref">Últimos 6 dígitos de la referencia</label>
+        <input id="rc-ref" type="text" class="input-field" placeholder="123456" maxlength="6" inputmode="numeric" />
+      </div>
+
+      <div class="field-group">
+        <label class="input-file-label" id="rc-file-label" for="rc-file" style="border-color:#00f0ff; color:#00f0ff;">
+          📎 Subir captura del Pago Móvil
+        </label>
+        <input id="rc-file" type="file" accept="image/*" style="display:none;" />
+      </div>
+
+      <div id="rc-global-err" class="field-error" style="margin-bottom:.7rem;"></div>
+      <div style="display:flex; gap:10px;">
+        <button id="btn-back-store" class="btn btn-ghost" style="flex:1;">ATRÁS</button>
+        <button id="btn-rc-submit" class="btn btn-primary" style="flex:2; background: linear-gradient(90deg, #00f0ff, #0055ff); border:none;">COMPRAR CP</button>
+      </div>
     </div>
+  `, { closable: true });
 
-    <p style="font-family:var(--font-mono);font-size:.62rem;color:var(--text-dim);margin-bottom:.5rem;letter-spacing:.05em;">PASO 3 — Sube el comprobante:</p>
-    <div class="field-group">
-      <label class="input-file-label" id="rc-file-label" for="rc-file">
-        📎 Toca para subir la captura de pago
-      </label>
-      <input id="rc-file" type="file" accept="image/*" style="display:none;" />
-    </div>
+  let selectedUSD = 0;
+  let selectedCP = 0;
 
-    <div id="rc-global-err" class="field-error" style="margin-bottom:.7rem;"></div>
-    <button id="btn-rc-submit" class="btn btn-primary" style="width:100%;height:46px;font-size:.75rem;letter-spacing:.12em;">
-      ENVIAR SOLICITUD
-    </button>
-    <p style="font-family:var(--font-mono);font-size:.58rem;color:var(--text-ghost);text-align:center;margin-top:.65rem;line-height:1.6;">
-      Tu recarga quedará en estado <strong style="color:#ffaa00;">Pendiente</strong> hasta aprobación del admin.
-    </p>`, { closable: false });
+  // Lógica de transición de la tienda
+  document.querySelectorAll('.pack-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      selectedCP = parseInt(btn.getAttribute('data-cp'));
+      selectedUSD = parseFloat(btn.getAttribute('data-usd'));
+      const totalBs = (selectedUSD * rate).toFixed(2);
+      
+      document.getElementById('sel-cp').textContent = `${selectedCP} CP`;
+      document.getElementById('sel-bs').textContent = `${parseFloat(totalBs).toLocaleString('es-VE')} Bs`;
+      
+      document.getElementById('store-step-1').style.display = 'none';
+      document.getElementById('store-step-2').style.display = 'block';
+    });
+  });
 
-  const $amount = document.getElementById('rc-amount');
-  const $calc   = document.getElementById('rc-calc');
-  const $bsRes  = document.getElementById('rc-bs-result');
-
-  $amount?.addEventListener('input', () => {
-    const usd = parseFloat($amount.value);
-    if (!isNaN(usd) && usd > 0) {
-      const bs = (usd * rate).toFixed(2);
-      $bsRes.textContent  = parseFloat(bs).toLocaleString('es-VE');
-      $calc.style.display = 'block';
-      $bsRes.style.transform = 'scale(1.06)';
-      setTimeout(() => { $bsRes.style.transform = ''; }, 200);
-    } else {
-      $calc.style.display = 'none';
-    }
+  document.getElementById('btn-back-store').addEventListener('click', () => {
+    document.getElementById('store-step-2').style.display = 'none';
+    document.getElementById('store-step-1').style.display = 'block';
   });
 
   const $file  = document.getElementById('rc-file');
   const $label = document.getElementById('rc-file-label');
   $file?.addEventListener('change', () => {
     if ($file.files[0]) {
-      $label.textContent = `✓ ${$file.files[0].name}`;
-      $label.classList.add('has-file');
+      $label.textContent = `✓ Captura cargada`;
+      $label.style.background = 'rgba(0,240,255,0.2)';
     }
   });
 
@@ -277,7 +326,7 @@ function openRechargeModal() {
     e.target.value = e.target.value.replace(/\D/g,'').slice(0,6);
   });
 
-  document.getElementById('btn-rc-submit')?.addEventListener('click', submitRecharge);
+  document.getElementById('btn-rc-submit')?.addEventListener('click', () => submitStorePurchase(selectedUSD, selectedCP, rate));
 }
 
 function bankRow(key, val) {
@@ -290,81 +339,76 @@ function bankRow(key, val) {
   </div>`;
 }
 
-async function submitRecharge() {
-  const $amount  = document.getElementById('rc-amount');
+// ⚡ PROCESAMIENTO DE COMPRA DE CRISTALES
+async function submitStorePurchase(usd, cpAmount, rate) {
   const $ref     = document.getElementById('rc-ref');
   const $file    = document.getElementById('rc-file');
   const $err     = document.getElementById('rc-global-err');
   const $btn     = document.getElementById('btn-rc-submit');
 
   $err.textContent = '';
-
-  const usd  = parseFloat($amount?.value);
   const ref  = $ref?.value.trim();
   const file = $file?.files[0];
-  const rate = getBcvRate();
 
-  if (isNaN(usd) || usd <= 0) { $err.textContent = 'Ingresa un monto válido.'; return; }
-  if (!/^\d{6}$/.test(ref))   { $err.textContent = 'La referencia debe tener 6 dígitos.'; return; }
-  if (!file)                  { $err.textContent = 'Debes subir el comprobante.'; return; }
+  if (!/^\d{6}$/.test(ref))   { $err.textContent = 'Ingresa los 6 dígitos de referencia.'; return; }
+  if (!file)                  { $err.textContent = 'Sube la captura de pantalla.'; return; }
 
-  $btn.disabled = true; $btn.textContent = 'SUBIENDO…'; $btn.style.opacity = '.65';
+  $btn.disabled = true; $btn.textContent = 'PROCESANDO...'; $btn.style.opacity = '.65';
 
   const sb      = getSupabase();
   const profile = getProfile();
   const ext     = file.name.split('.').pop();
   const path    = `${profile.id}_${Date.now()}.${ext}`;
 
-  const { error: uploadErr } = await sb.storage
-    .from('comprobantes')
-    .upload(path, file, { cacheControl: '3600', upsert: false });
+  try {
+    const { error: uploadErr } = await sb.storage.from('comprobantes').upload(path, file, { cacheControl: '3600', upsert: false });
+    if (uploadErr) throw new Error("Error subiendo captura: " + uploadErr.message);
 
-  if (uploadErr) {
-    $err.textContent = `Error al subir imagen: ${uploadErr.message}`;
-    $btn.disabled = false; $btn.textContent = 'ENVIAR SOLICITUD'; $btn.style.opacity = '1';
-    return;
+    const { data: urlData } = sb.storage.from('comprobantes').getPublicUrl(path);
+    const imageUrl = urlData?.publicUrl ?? '';
+    const bs = parseFloat((usd * rate).toFixed(2));
+
+    // GUARDAMOS EN BASE DE DATOS (Mantenemos la compatibilidad con tu panel admin usando amount_bs y amount_usd)
+    // Cuando el admin apruebe, le debe sumar la cantidad equivalente en la tabla users
+    const { error: insertErr } = await sb.from('recharges').insert({
+      user_email: profile.email,
+      amount_usd: usd,
+      amount_bs:  bs,
+      reference:  ref,
+      image_url:  imageUrl,
+      status:     'pending',
+    });
+
+    if (insertErr) throw new Error(insertErr.message);
+
+    hideModal();
+    showToast(`Compra de ${cpAmount} CP enviada. Esperando verificación del sistema.`, 'warning', 6000);
+  } catch (error) {
+    console.error(error);
+    $err.textContent = error.message;
+  } finally {
+    $btn.disabled = false; $btn.textContent = 'COMPRAR CP'; $btn.style.opacity = '1';
   }
-
-  const { data: urlData } = sb.storage.from('comprobantes').getPublicUrl(path);
-  const imageUrl = urlData?.publicUrl ?? '';
-
-  const bs = parseFloat((usd * rate).toFixed(2));
-  const { error: insertErr } = await sb.from('recharges').insert({
-    user_email: profile.email,
-    amount_usd: usd,
-    amount_bs:  bs,
-    reference:  ref,
-    image_url:  imageUrl,
-    status:     'pending',
-  });
-
-  $btn.disabled = false; $btn.textContent = 'ENVIAR SOLICITUD'; $btn.style.opacity = '1';
-
-  if (insertErr) {
-    $err.textContent = `Error al registrar: ${insertErr.message}`;
-    return;
-  }
-
-  hideModal();
-  showToast(`Solicitud enviada por $${usd.toFixed(2)} (${bs.toLocaleString('es-VE')} Bs). Estado: Pendiente.`, 'warning', 6000);
 }
 
+// ⚡ MODAL DE CANJEO DE CP A BOLÍVARES
 function openWithdrawModal() {
-  const bs = getWalletBs();
+  const profile = getProfile();
+  const cpBalance = Number(profile.wallet_bs || 0);
 
   showModal(`
     <button class="modal-close" onclick="window.__CW_hideModal()">✕</button>
-    <div class="modal-title">${iconArrow()} RETIRAR FONDOS</div>
-    <p style="font-family:var(--font-mono);font-size:.65rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.6;">
-      Saldo disponible: <strong style="color:var(--blue);">${bs.toLocaleString('es-VE')} Bs</strong>
+    <div class="modal-title" style="color:#ff00ff;">${iconArrow()} CANJEAR COLOR-POINS</div>
+    <p style="font-family:var(--font-mono);font-size:.65rem;color:var(--text-dim);margin-bottom:1rem;line-height:1.6; text-align:center;">
+      CP Disponibles: <strong style="color:#00f0ff; font-size:1.1rem;">${cpBalance.toLocaleString('es-VE')} CP</strong>
     </p>
 
     <div class="field-group">
-      <label class="field-label" for="wd-amount">Monto a retirar (Bs)</label>
-      <input id="wd-amount" type="number" min="1" step="1" class="input-field" placeholder="Bs a retirar" inputmode="decimal" />
+      <label class="field-label" for="wd-amount">Cantidad de CP a canjear</label>
+      <input id="wd-amount" type="number" min="1" step="1" class="input-field" placeholder="Ej: 500" inputmode="decimal" style="border-color:#ff00ff;" />
     </div>
     <div class="field-group">
-      <label class="field-label" for="wd-bank">Banco</label>
+      <label class="field-label" for="wd-bank">Banco Destino</label>
       <input id="wd-bank" type="text" class="input-field" placeholder="Ej: Banco de Venezuela" />
     </div>
     <div class="field-group">
@@ -377,16 +421,15 @@ function openWithdrawModal() {
     </div>
 
     <div id="wd-err" class="field-error" style="margin-bottom:.7rem;"></div>
-    <button id="btn-wd-submit" class="btn btn-primary" style="width:100%;height:46px;font-size:.75rem;letter-spacing:.12em;">
-      SOLICITAR RETIRO
+    <button id="btn-wd-submit" class="btn btn-primary" style="width:100%;height:46px;font-size:.75rem;letter-spacing:.12em; background:#ff00ff; border:none; box-shadow:0 0 10px rgba(255,0,255,0.5);">
+      SOLICITAR CANJE
     </button>`, { closable: true });
 
   document.getElementById('btn-wd-submit')?.addEventListener('click', submitWithdraw);
 }
 
-// ⚡ LÓGICA DE RETIRO CON ESCÁNER DE ERRORES REALES
 async function submitWithdraw() {
-  const amount = parseFloat(document.getElementById('wd-amount')?.value);
+  const amountCP = parseFloat(document.getElementById('wd-amount')?.value);
   const bank   = document.getElementById('wd-bank')?.value.trim();
   const phone  = document.getElementById('wd-phone')?.value.trim();
   const ci     = document.getElementById('wd-ci')?.value.trim();
@@ -394,25 +437,24 @@ async function submitWithdraw() {
   const $btn   = document.getElementById('btn-wd-submit');
   
   const profile = getProfile();
-  const bs = Number(profile.wallet_bs);
+  const cpBalance = Number(profile.wallet_bs);
 
   $err.textContent = '';
 
-  if (isNaN(amount) || amount <= 0)  { $err.textContent = 'Monto inválido.'; return; }
-  if (amount > bs)                   { $err.textContent = `Saldo insuficiente. Tienes ${bs.toLocaleString('es-VE')} Bs.`; return; }
-  if (!bank)                         { $err.textContent = 'Ingresa el banco.'; return; }
-  if (!phone)                        { $err.textContent = 'Ingresa el teléfono.'; return; }
-  if (!ci)                           { $err.textContent = 'Ingresa la cédula.'; return; }
+  if (isNaN(amountCP) || amountCP <= 0)  { $err.textContent = 'Monto de CP inválido.'; return; }
+  if (amountCP > cpBalance)              { $err.textContent = `Insuficientes CP. Tienes ${cpBalance}.`; return; }
+  if (!bank)                             { $err.textContent = 'Ingresa el banco.'; return; }
+  if (!phone)                            { $err.textContent = 'Ingresa el teléfono.'; return; }
+  if (!ci)                               { $err.textContent = 'Ingresa la cédula.'; return; }
 
   $btn.disabled = true; $btn.textContent = 'PROCESANDO…'; $btn.style.opacity = '.65';
 
   const sb = getSupabase();
 
   try {
-    // 1. Intentamos guardar el recibo (OJO: mando los datos como Array por reglas estrictas de Supabase)
     const { error: insertErr } = await sb.from('withdrawals').insert([{
       user_email: profile.email || 'Jugador',
-      amount_bs: amount,
+      amount_bs: amountCP, 
       bank: bank,
       phone: phone,
       ci: ci,
@@ -421,24 +463,22 @@ async function submitWithdraw() {
 
     if (insertErr) throw new Error("DB Error: " + insertErr.message);
 
-    // 2. Si se guardó, descontamos la plata
-    const newBalance = bs - amount;
+    const newBalance = cpBalance - amountCP;
     const { error: updateErr } = await sb.from('users').update({ wallet_bs: newBalance }).eq('id', profile.id);
 
     if (updateErr) throw new Error("Update Error: " + updateErr.message);
 
     hideModal();
-    showToast(`Retiro de ${amount.toLocaleString('es-VE')} Bs en proceso.`, 'info', 6000);
+    showToast(`Solicitud de canje por ${amountCP} CP en proceso.`, 'info', 6000);
     
     await reloadProfile();
     setView('dashboard');
 
   } catch (error) {
-    // 🔥 AQUÍ ESTÁ LA MAGIA: IMPRIME EL ERROR REAL QUE MANDA SUPABASE EN PANTALLA
     console.error(error);
     $err.innerHTML = `<strong>Falla detectada:</strong> ${error.message}`;
   } finally {
-    $btn.disabled = false; $btn.textContent = 'SOLICITAR RETIRO'; $btn.style.opacity = '1';
+    $btn.disabled = false; $btn.textContent = 'SOLICITAR CANJE'; $btn.style.opacity = '1';
   }
 }
 
