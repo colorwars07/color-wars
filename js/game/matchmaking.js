@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/views/matchmaking.js
- * MULTIJUGADOR REAL CORREGIDO (ROSADO VS AZUL) + BOT
+ * MULTIJUGADOR + EXTERMINADOR DE FANTASMAS + ECONOMÍA 30 CP
  * ═══════════════════════════════════════════════════════
  */
 import { registerView, showToast } from '../core/app.js';
@@ -14,62 +14,39 @@ let _searchTimer = null;
 let _countdownTimer = null;
 let _matchChannel = null;   
 let _currentMatchId = null; 
+const ENTRY_FEE = 30; // ⚡ Economía actualizada
 
-// La lista de 300 nombres venezolanos
 const VZLA_NAMES = [
-  "Adriana Colmenares", "La Catira", "La Flaca", "El Brayan", "Yuridia", "La Gocha", "El Chino", "Yulitza Uzcátegui",
-  "El Menor", "La Chama", "Junior", "El Barbero", "Maikol Jackson", "La Doña", "El Gordo", "Yuleisi",
-  "El Catire", "La Comadre", "Juancho", "El Mecánico", "Yurimar Pernía", "La Negra", "Wilmer", "Dayana Chacón",
-  "El Brother", "El Cuñado", "Mariángel", "El Portugués", "Tibisay Quintero", "El Tío", "La Morocha", "El Kevin",
-  "Xiomara Rangel", "El Chamo", "La Morena", "Yeison", "Zuleima Bastidas", "El Abuelo", "La Tía", "Josmer",
-  "Karelys Sanguino", "El Gocho", "La Patrona", "Gladys Vielma", "El Pana", "Estefanía Arrieta", "El Negro", "Keila Chirinos",
-  "La Niña", "Yorvis", "Yurubí Graterol", "El Chigüire", "Daniela Torrealba", "El Pelúo", "Milagros Machillanda", "El Chacal",
-  "Norelys Zerpa", "La Prima", "Joselyn Monagas", "El Maracucho", "Oriana Guedez", "La Gorda", "Belkis Figueroa", "El Convive",
-  "Yorgelis Palacios", "El Vigilante", "Magaly Betancourt", "Zulay Morillo", "La Doctora", "Indira Tovar", "El Socio", "Lisbeth Araujo",
-  "El Pollo", "Mary Carmen Padrón", "La Teacher", "Yanitza Ledezma", "El Gato", "Dayerlin Infante", "La Baby", "Roxana Bencomo",
-  "El Flaco", "Franyelis Mota", "El Jefe", "Deisy Altuve", "La Comadrita", "Nayarith Vizcaíno", "El Sobrino", "Jhoana Guédez",
-  "La Cucha", "Mildred Seijas", "El Capo", "Solángel Malavé", "La Abuela", "Yamileth Guanipa", "El Mocho", "Luisa Amelia Farías",
-  "La Jeva", "Ninoska Vallenilla", "El Musulmán", "Maryuri Agüero", "La Catirita", "Isabel Cristina Guevara", "El Pelao", "Rosaura Bermúdez",
-  "La Ñema", "Aura Rosa Manrique", "El Manguera", "Thais Carrizo", "La Chuchu", "Leidys Oropeza", "El Ratón", "Marbella Lucena",
-  "La Sirena", "Katiuska Amundaray", "El Oso", "Elvia Azuaje", "La Cuaima", "Reina Isabel Lugo", "El Tigre", "Mireya Antequera",
-  "La Peque", "Dalia Henríquez", "El Burro", "Paola Valentina Silva", "La Reina", "Nellys Margarita Peña", "El Capitán", "Haydée Zambrano",
-  "Yanetzi Barrios", "El Viejo", "Maigualida Márquez", "La Mami", "Doris Egleé Guerra", "El Papi", "Edicta Rivas", "Flor María Aranguren",
-  "El Profe", "Irama Coromoto Paz", "El Abogado", "Judit Carvajal", "La Secretaria", "Katherine Villegas", "El Chofer", "Leonor Sánchez",
-  "La Doñita", "Mirla Blanco", "El Bachaco", "Nancy Salazar", "El Caballo", "Olga Marina Díaz", "Petra Leonor Méndez", "Quiteria Rojas",
-  "Rita Elena Pérez", "El Colector", "Saraí Mendoza", "El Pescador", "Teresa de Jesús Flores", "La Costurera", "Úrsula Rivero", "El Herrero",
-  "Verónica García", "Wendy Josefina Torres", "El Pintor", "Xiorama Rodríguez", "El Carpintero", "Yaneth López", "El Albañil", "Zoila Martínez",
-  "El Electricista", "Ana Karina Hernández", "La Enfermera", "Beatriz González", "El Bombero", "Carolina Ramírez", "La Policía", "Diana Morales",
-  "El Sargento", "Elena Castillo", "La Teniente", "Fanny Medina", "El Coronel", "Gabriela Castro", "El General", "Hilda Romero",
-  "El Alcalde", "Irene Herrera", "La Concejala", "Juana Álvarez", "La Vecina", "Karina Ruiz", "El Vecino", "Laura Suaréz",
-  "Martha Ortega", "Nora Machado", "Olivia Prieto", "Patricia Urdaneta", "Raquel Boscán", "Silvia Parra", "Tatiana Nava", "Valeria Pirela",
-  "Wilmarys Petit", "Yennyfer Oberto", "Zulay Guanipa", "Anabel Espina", "Brenda Valera", "Cecilia Molero", "Danna Rincón", "Erika Atencio",
-  "Fiorella Godoy", "Gisela Luengo", "Heidy Mavárez", "Ivonne Camargo", "Jenny Chirinos", "Kelly Acurero", "Leslie Colina", "Mariela Ocando",
-  "Neritza Montero", "Odalis Matos", "Prudencia Piña", "Rosiris Sierra", "Sandra Vivas", "Trina Chacín", "Viviana Mujica", "Yajaira Galué",
-  "Zaida Vilchez", "Alba Nidia Rojas", "Berta Alarcón", "Clotilde Morán", "Dulce María Bello", "Enma Soto", "Felicia Vargas", "Gloria Estefan",
-  "Herminia Prado", "Inés María Loyo", "Josefa Barrientos", "Ligia Elena Osorio", "Margot Freites", "Nohemí Landaeta", "Otilia Vielma", "Pastora Carullo",
-  "Ramona Velásquez", "Sonia Graterol", "Teotiste Gallegos", "Virginia Loyo", "Yudith Cardozo", "El Yonaiker", "La Britany", "El Wuayoyo",
-  "La Pelúa", "El Churro", "Josué", "El Malandro", "La Sifrina", "El Tukky", "Yosmar", "El Chacalito", "La Beba",
-  "El Compadre", "Yorman", "El Cocho", "La Buchona", "El Chamo del agua", "Franklin", "El Cachicamo", "La Flaca de la esquina",
-  "El Gordo del gas", "Jhonny", "El Menorcito", "La Chama de las uñas", "El Motorizado", "Yender", "La Catira de la bodega", "El Chamo del delivery",
-  "Wilmer José", "La Señora de las empanadas", "El Chamo de la basura", "Darwin", "El Vendedor", "La Muchacha del banco", "El Guardia", "Yeferson",
-  "La Miliciana", "El Colectivo", "Ender", "La Parilla", "El Chamo de la corneta", "Richard", "El Gordito", "La Chama del Instagram",
-  "El Influencer", "Alirio", "El Youtuber", "Omar Enrique", "La Tiktoker", "Robinson", "El Gamer", "Oswaldo", "La Hacker",
-  "Rubén Darío", "El Programador"
+  "El Bryan", "La Catira", "El Menor", "Yuridia", "El Gocho", "La Chama", "Maikol", "Yuleisi",
+  "El Chino", "La Negra", "Juancho", "Dayana", "El Portugués", "Mariángel", "El Convive", "El Tuki"
 ];
 
 export async function initMatchmaking($container) {
   const profile = getProfile();
   if (!profile) { setView('auth'); return; }
 
-  if (profile.wallet_bs < 200) {
-    showToast('Saldo insuficiente. Necesitas 200 Bs.', 'error');
+  if (profile.wallet_bs < ENTRY_FEE) {
+    showToast(`Saldo insuficiente. Necesitas ${ENTRY_FEE} CP.`, 'error');
     setView('dashboard');
     return;
   }
 
   _currentMatchId = null;
   renderSearchScreen($container);
+  
+  // ⚡ EXTERMINADOR DE FANTASMAS (Evita bucles de partidas viejas)
+  await cleanupGhostMatches(profile.id);
+
   startSearch($container, profile);
+}
+
+// Mata cualquier partida que el jugador haya dejado abandonada antes de buscar una nueva
+async function cleanupGhostMatches(userId) {
+  const sb = getSupabase();
+  try {
+    await sb.from('matches').update({ status: 'cancelled' }).eq('player_pink', userId).in('status', ['waiting', 'playing']);
+    await sb.from('matches').update({ status: 'cancelled' }).eq('player_blue', userId).in('status', ['waiting', 'playing']);
+  } catch (e) { console.error("Error limpiando fantasmas:", e); }
 }
 
 function renderSearchScreen($c) {
@@ -87,32 +64,38 @@ function renderSearchScreen($c) {
   $c.querySelector('#btn-cancel-search').addEventListener('click', cancelSearch);
 }
 
+async function payEntryFee() {
+  const profile = getProfile();
+  const sb = getSupabase();
+  try {
+    const newBalance = Number(profile.wallet_bs) - ENTRY_FEE;
+    await sb.from('users').update({ wallet_bs: newBalance }).eq('id', profile.id);
+    setProfile({ ...profile, wallet_bs: newBalance });
+  } catch(e) { console.error("Error cobrando entrada:", e); }
+}
+
 async function startSearch($c, profile) {
   const sb = getSupabase();
 
   try {
-    // 1. Cobrar entrada por adelantado
-    const newBalance = Number(profile.wallet_bs) - 200;
-    await sb.from('users').update({ wallet_bs: newBalance }).eq('id', profile.id);
-    setProfile({ ...profile, wallet_bs: newBalance });
-
-    // 2. Buscar si alguien más está esperando en Supabase (Usamos profile.id, NO email)
     const { data: waitingMatch, error: searchErr } = await sb
       .from('matches')
       .select('*')
       .eq('status', 'waiting')
-      .neq('player_pink', profile.id) // No unirse a sí mismo
+      .neq('player_pink', profile.id) 
       .limit(1)
       .maybeSingle();
 
     if (searchErr) throw searchErr;
 
     if (waitingMatch) {
-      // 3A. ¡ENCONTRÉ A ALGUIEN! El que llega de segundo es el AZUL.
+      // ENCONTRAMOS UN HUMANO
       await sb.from('matches').update({
         player_blue: profile.id,
         status: 'playing'
       }).eq('id', waitingMatch.id);
+
+      await payEntryFee();
 
       window.CW_SESSION = {
         isBotMatch: false,
@@ -126,7 +109,7 @@ async function startSearch($c, profile) {
       startCountdown($c);
 
     } else {
-      // 3B. NO HAY NADIE. Yo creo la sala, me toca ser el ROSADO y jugar de primero.
+      // CREAMOS SALA DE ESPERA
       const { data: newMatch, error: insertErr } = await sb.from('matches').insert([{
         player_pink: profile.id,
         status: 'waiting'
@@ -135,13 +118,14 @@ async function startSearch($c, profile) {
       if (insertErr) throw insertErr;
       _currentMatchId = newMatch.id;
 
-      // 4. Conectar el Cable de Supabase y sentarse a esperar
       _matchChannel = sb.channel(`match_${newMatch.id}`)
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${newMatch.id}` }, (payload) => {
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${newMatch.id}` }, async (payload) => {
           if (payload.new.status === 'playing' && payload.new.player_blue !== 'BOT') {
-            // ¡OTRO HUMANO ENTRÓ A MI SALA!
+            
             clearTimeout(_searchTimer);
             sb.removeChannel(_matchChannel); 
+
+            await payEntryFee();
 
             window.CW_SESSION = {
               isBotMatch: false,
@@ -157,7 +141,7 @@ async function startSearch($c, profile) {
         })
         .subscribe();
 
-      // 5. Encender reloj de 35 segundos para el Bot
+      // Reloj para el Bot (35s)
       _searchTimer = setTimeout(() => {
         setupBotMatchFallback($c, profile);
       }, 35000);
@@ -174,28 +158,18 @@ async function cancelSearch() {
   clearTimeout(_countdownTimer);
   
   const sb = getSupabase();
-  const profile = getProfile();
+  if (_matchChannel) sb.removeChannel(_matchChannel);
 
-  if (_matchChannel) {
-    sb.removeChannel(_matchChannel);
-  }
-
-  // REEMBOLSO SI CANCELA MIENTRAS ESPERABA
   if (_currentMatchId) {
     try {
-      const newBalance = Number(profile.wallet_bs) + 200; 
-      await sb.from('users').update({ wallet_bs: newBalance }).eq('id', profile.id);
-      setProfile({ ...profile, wallet_bs: newBalance });
-      
       await sb.from('matches').update({ status: 'cancelled' }).eq('id', _currentMatchId);
-    } catch(e) { console.error("Error reembolsando:", e); }
+    } catch(e) { console.error("Error cancelando sala:", e); }
   }
   
   _currentMatchId = null;
   setView('dashboard');
 }
 
-// PLAN B: EL BOT VENEZOLANO
 async function setupBotMatchFallback($c, profile) {
   const sb = getSupabase();
   if (_matchChannel) sb.removeChannel(_matchChannel);
@@ -214,8 +188,11 @@ async function setupBotMatchFallback($c, profile) {
       }).eq('id', _currentMatchId);
     }
 
+    await payEntryFee();
+
     window.CW_SESSION = {
       isBotMatch: true,
+      matchId: _currentMatchId, // Se mantiene para que el servidor pueda guardar todo
       botName: randomName,
       humanWinsNext: humanWinsNext, 
       myColor: 'pink',
