@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/game/board.js
- * MONOLITO: MULTIJUGADOR + SERVIDOR PAGA + SALIDA LIMPIA
+ * MONOLITO 100/100: IA BLINDADA + GUARDADO ESTRICTO + DOBLE DISPARO
  * ═══════════════════════════════════════════════════════
  */
 
@@ -39,33 +39,49 @@ export async function initGameView($container) {
 
   const sb = getSupabase();
 
-  if (!window.CW_SESSION.isBotMatch && window.CW_SESSION.matchId) {
-    
+  // ⚡ ESCUDO 1: OBLIGAMOS A LEER SUPABASE SIEMPRE (Sea Humano o Bot)
+  if (window.CW_SESSION.matchId) {
     try {
       const { data: matchData } = await sb.from('matches').select('*').eq('id', window.CW_SESSION.matchId).single();
       if (matchData) {
+        if (matchData.status === 'finished' || matchData.status === 'cancelled') {
+            setView('dashboard');
+            return;
+        }
         if (matchData.board_state) window.CW_SESSION.board = matchData.board_state;
         if (matchData.current_turn) _currentTurn = matchData.current_turn;
-      }
-    } catch(e) { console.error("Error cargando tablero:", e); }
-
-    _matchChannel = sb.channel(`game_${window.CW_SESSION.matchId}`)
-      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${window.CW_SESSION.matchId}` }, (payload) => {
-        const newData = payload.new;
         
-        if (newData.status === 'finished' || newData.status === 'cancelled') {
-           if (newData.winner) _finishGame(newData.winner, true);
-           return;
+        // Recalculamos los turnos jugados para que el sistema sepa si ya puede declarar un ganador
+        let pieces = 0;
+        for(let r=0; r<BOARD_SIZE; r++) {
+           for(let c=0; c<BOARD_SIZE; c++) {
+              if (matchData.board_state[r][c].owner) pieces++;
+           }
         }
+        _turnCount = pieces;
+      }
+    } catch(e) { console.error("Error cargando tablero desde Supabase:", e); }
 
-        if (newData.current_turn === window.CW_SESSION.myColor && _currentTurn !== window.CW_SESSION.myColor) {
-           window.CW_SESSION.board = newData.board_state;
-           _currentTurn = newData.current_turn;
-           updateDOM();
-           _startTurn();
-        }
-      })
-      .subscribe();
+    // El canal en tiempo real solo lo abrimos para Humanos
+    if (!window.CW_SESSION.isBotMatch) {
+      _matchChannel = sb.channel(`game_${window.CW_SESSION.matchId}`)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${window.CW_SESSION.matchId}` }, (payload) => {
+          const newData = payload.new;
+          
+          if (newData.status === 'finished' || newData.status === 'cancelled') {
+             if (newData.winner) _finishGame(newData.winner, true);
+             return;
+          }
+
+          if (newData.current_turn === window.CW_SESSION.myColor && _currentTurn !== window.CW_SESSION.myColor) {
+             window.CW_SESSION.board = newData.board_state;
+             _currentTurn = newData.current_turn;
+             updateDOM();
+             _startTurn();
+          }
+        })
+        .subscribe();
+    }
   }
 
   renderHTML();
@@ -258,27 +274,27 @@ async function claimForfeitVictory() {
   _finishGame(myColor, true);
 }
 
+// ⚡ ESCUDO 1: GUARDAR SIEMPRE EN SUPABASE, INCLUSO PARA BOTS
 async function _passTurn() {
   if (!_active) return;
   _turnCount++;
   const nextTurn = _currentTurn === 'pink' ? 'blue' : 'pink';
 
-  if (window.CW_SESSION.isBotMatch) {
-     _currentTurn = nextTurn;
-     _startTurn();
-  } else {
-     if (_currentTurn === window.CW_SESSION.myColor) {
-        _currentTurn = nextTurn; 
-        updateTimerUI(); 
-        
-        const sb = getSupabase();
-        await sb.from('matches').update({
-           board_state: window.CW_SESSION.board,
-           current_turn: nextTurn
-        }).eq('id', window.CW_SESSION.matchId);
-        
-        _startTurn();
+  if (_currentTurn === window.CW_SESSION.myColor || window.CW_SESSION.isBotMatch) {
+     _currentTurn = nextTurn; 
+     updateTimerUI(); 
+     
+     if (window.CW_SESSION.matchId) {
+         const sb = getSupabase();
+         try {
+             await sb.from('matches').update({
+                board_state: window.CW_SESSION.board,
+                current_turn: nextTurn
+             }).eq('id', window.CW_SESSION.matchId);
+         } catch(e) { console.error("Error guardando turno:", e); }
      }
+     
+     _startTurn();
   }
 }
 
@@ -324,65 +340,70 @@ async function _explode(row, col, color) {
   }
 }
 
+// ⚡ ESCUDO 2: EL CEREBRO BLINDADO DEL BOT (Si falla, pasa turno, nunca se congela)
 function _botMove() {
-  const board = window.CW_SESSION.board;
-  const humanWinsNext = window.CW_SESSION.humanWinsNext; 
-  
-  const botCells = [];
-  for (let r = 0; r < BOARD_SIZE; r++) {
-    for (let c = 0; c < BOARD_SIZE; c++) {
-      if (board[r][c].owner === 'blue') botCells.push({r, c, mass: board[r][c].mass});
-    }
-  }
-
-  if (botCells.length === 0) {
-    const emptyPool = [];
+  try {
+    const board = window.CW_SESSION.board;
+    const humanWinsNext = window.CW_SESSION.humanWinsNext === true; 
+    
+    const botCells = [];
     for (let r = 0; r < BOARD_SIZE; r++) {
       for (let c = 0; c < BOARD_SIZE; c++) {
-        if (!board[r][c].owner) emptyPool.push({r, c});
+        if (board[r][c].owner === 'blue') botCells.push({r, c, mass: board[r][c].mass});
       }
     }
-    if (emptyPool.length > 0) {
-        const startMove = emptyPool[Math.floor(Math.random() * emptyPool.length)];
-        _addMass(startMove.r, startMove.c, 'blue');
-    } else {
-        _passTurn();
-    }
-    return;
-  }
 
-  if (humanWinsNext === false) {
-    const readyToExplode = botCells.filter(cell => cell.mass === 3);
-    if (readyToExplode.length > 0) {
-      const move = readyToExplode[Math.floor(Math.random() * readyToExplode.length)];
-      _addMass(move.r, move.c, 'blue');
-      return;
-    }
-    
-    const massTwo = botCells.filter(cell => cell.mass === 2);
-    if (massTwo.length > 0) {
-      const move = massTwo[Math.floor(Math.random() * massTwo.length)];
-      _addMass(move.r, move.c, 'blue');
+    if (botCells.length === 0) {
+      const emptyPool = [];
+      for (let r = 0; r < BOARD_SIZE; r++) {
+        for (let c = 0; c < BOARD_SIZE; c++) {
+          if (!board[r][c].owner) emptyPool.push({r, c});
+        }
+      }
+      if (emptyPool.length > 0) {
+          const startMove = emptyPool[Math.floor(Math.random() * emptyPool.length)];
+          _addMass(startMove.r, startMove.c, 'blue');
+      } else {
+          _passTurn();
+      }
       return;
     }
 
-    const move = botCells[Math.floor(Math.random() * botCells.length)];
-    _addMass(move.r, move.c, 'blue');
-    return;
-  } 
-  
-  if (humanWinsNext === true) {
-    const safeCells = botCells.filter(cell => cell.mass < 3);
+    if (!humanWinsNext) {
+      const readyToExplode = botCells.filter(cell => cell.mass === 3);
+      if (readyToExplode.length > 0) {
+        const move = readyToExplode[Math.floor(Math.random() * readyToExplode.length)];
+        _addMass(move.r, move.c, 'blue');
+        return;
+      }
+      
+      const massTwo = botCells.filter(cell => cell.mass === 2);
+      if (massTwo.length > 0) {
+        const move = massTwo[Math.floor(Math.random() * massTwo.length)];
+        _addMass(move.r, move.c, 'blue');
+        return;
+      }
 
-    if (safeCells.length > 0) {
-      const move = safeCells[Math.floor(Math.random() * safeCells.length)];
-      _addMass(move.r, move.c, 'blue');
-      return;
-    } else {
       const move = botCells[Math.floor(Math.random() * botCells.length)];
       _addMass(move.r, move.c, 'blue');
       return;
+    } else {
+      const safeCells = botCells.filter(cell => cell.mass < 3);
+
+      if (safeCells.length > 0) {
+        const move = safeCells[Math.floor(Math.random() * safeCells.length)];
+        _addMass(move.r, move.c, 'blue');
+        return;
+      } else {
+        const move = botCells[Math.floor(Math.random() * botCells.length)];
+        _addMass(move.r, move.c, 'blue');
+        return;
+      }
     }
+  } catch (err) {
+    // Si la matemática le da un ACV, imprimimos el error pero PASAMOS EL TURNO para no joder al jugador
+    console.error("BOT CRASH EVITADO:", err);
+    _passTurn();
   }
 }
 
@@ -406,7 +427,6 @@ function _checkGameOver() {
   return false;
 }
 
-// ⚡ LÓGICA BLINDADA: ELIMINADO EL CANDADO DEL BOT. CIERRA SIEMPRE LA PARTIDA.
 async function _finishGame(winnerColor, fromDB = false) {
   if (!_active) return; 
   _active = false;
@@ -421,8 +441,6 @@ async function _finishGame(winnerColor, fromDB = false) {
   try {
     const sb = getSupabase();
 
-    // 1. EL TELÉFONO LE AVISA A SUPABASE QUE ALGUIEN GANÓ (Sea Humano o Bot)
-    // La condición de matchId salva el guardado si por alguna razón no existe
     if (!fromDB && window.CW_SESSION.matchId) {
        await sb.from('matches').update({ 
            status: 'finished', 
@@ -430,21 +448,20 @@ async function _finishGame(winnerColor, fromDB = false) {
            board_state: window.CW_SESSION.board
        }).eq('id', window.CW_SESSION.matchId);
     }
-    
   } catch (e) { console.error("Error al finalizar:", e); }
 
   _$container.innerHTML = `
     <div class="result-screen" style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:100vh; width: 100%; background:var(--bg-dark); position: absolute; top: 0; left: 0; z-index: 999;">
       <h1 class="result-title ${win ? 'result-win' : 'result-lose'}">${win ? '¡VICTORIA!' : 'DERROTA'}</h1>
       <p style="color:var(--text-dim);font-family:var(--font-mono);margin-bottom:2rem; text-align:center;">
-        ${win ? '+320 Bs acreditados' : 'Perdiste la batalla'}
+        ${win ? '+50 CP acreditados' : 'Perdiste la batalla'}
       </p>
       <button class="btn btn-primary" id="btn-exit" style="width:200px;">VOLVER AL INICIO</button>
       <p id="board-error-log" style="color:#ff4444; font-size:0.8rem; margin-top:15px; text-align:center; max-width:80%; font-family:var(--font-mono);"></p>
     </div>
   `;
   
-  // ⚡ BOTÓN DE SALIDA BLINDADO
+  // ⚡ ESCUDO 3 (DOBLE DISPARO): Aseguramos la muerte de la partida al presionar el botón de salida
   _$container.querySelector('#btn-exit').addEventListener('click', async () => {
     const $btn = _$container.querySelector('#btn-exit');
     const $err = _$container.querySelector('#board-error-log');
@@ -454,9 +471,14 @@ async function _finishGame(winnerColor, fromDB = false) {
       $btn.style.opacity = "0.7";
       $btn.style.pointerEvents = "none";
       
+      // DOBLE DISPARO A SUPABASE: Asegurarnos de que quede en 'finished' sí o sí
+      if (window.CW_SESSION && window.CW_SESSION.matchId) {
+          const sb = getSupabase();
+          await sb.from('matches').update({ status: 'finished' }).eq('id', window.CW_SESSION.matchId);
+      }
+      
       window.CW_SESSION = null; 
       
-      // Recargamos perfil con import dinámico
       const { reloadProfile } = await import('../core/state.js');
       await reloadProfile(); 
       setView('dashboard');
