@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/game/board.js
- * MONOLITO FINAL: IA TERMINATOR LEGAL + SALIDA BLINDADA
+ * MONOLITO FINAL: MOTOR DE AJEDREZ (MINIMAX) + ANTI-BUCLES
  * ═══════════════════════════════════════════════════════
  */
 
@@ -142,7 +142,7 @@ function handlePlayerClick(row, col) {
     for (let c = 0; c < BOARD_SIZE; c++) { if (window.CW_SESSION.board[r][c].owner === myColor) myCellsCount++; }
   }
   
-  // REGLA DE ORO DEL JUGADOR
+  // Regla de Oro
   if (myCellsCount > 0 && cell.owner !== myColor) { 
       showToast('Debes expandir tus propias fichas', 'warning'); 
       return; 
@@ -176,7 +176,7 @@ function _startTurn() {
       setTimeout(() => {
         if (!_active || _currentTurn !== botColor) return;
         _botMove();
-      }, 800 + Math.random() * 700); 
+      }, 1000 + Math.random() * 500); 
     }
   }
 }
@@ -232,182 +232,4 @@ async function _processMass(row, col, color) {
   const cell = window.CW_SESSION.board[row][col];
   cell.owner = color; cell.mass++;
 
-  if (cell.mass >= 4) { await _explode(row, col, color); } else { updateDOM(); }
-}
-
-async function _explode(row, col, color) {
-  if (!_active) return;
-  window.CW_SESSION.board[row][col].mass = 0; window.CW_SESSION.board[row][col].owner = null; 
-  updateDOM();
-
-  const neighbors = [];
-  if (row > 0) neighbors.push({row: row - 1, col});
-  if (row < BOARD_SIZE - 1) neighbors.push({row: row + 1, col});
-  if (col > 0) neighbors.push({row, col: col - 1});
-  if (col < BOARD_SIZE - 1) neighbors.push({row, col: col + 1});
-
-  await new Promise(r => setTimeout(r, 200));
-
-  for (const n of neighbors) {
-    if (!_active) break;
-    await _processMass(n.row, n.col, color);
-  }
-}
-
-// 🤖 CEREBRO TERMINATOR
-function _botMove() {
-  try {
-    const board = window.CW_SESSION.board;
-    const enemyColor = window.CW_SESSION.myColor;
-    const botColor = enemyColor === 'pink' ? 'blue' : 'pink'; 
-    const validMoves = [];
-
-    let botCellsCount = 0;
-    for (let r = 0; r < BOARD_SIZE; r++) {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        if (board[r][c].owner === botColor) botCellsCount++;
-      }
-    }
-
-    // REGLA DE ORO DEL BOT
-    for (let r = 0; r < BOARD_SIZE; r++) {
-      for (let c = 0; c < BOARD_SIZE; c++) {
-        if (botCellsCount > 0) {
-            if (board[r][c].owner === botColor) validMoves.push({ r, c, mass: board[r][c].mass, owner: botColor });
-        } else {
-            if (!board[r][c].owner) validMoves.push({ r, c, mass: 0, owner: null });
-        }
-      }
-    }
-
-    if (validMoves.length === 0) { _passTurn(); return; }
-
-    if (botCellsCount === 0) {
-      validMoves.sort((a, b) => {
-        const distA = Math.abs(a.r - 2) + Math.abs(a.c - 2);
-        const distB = Math.abs(b.r - 2) + Math.abs(b.c - 2);
-        return distA - distB;
-      });
-      const startMove = validMoves[Math.floor(Math.random() * Math.min(3, validMoves.length))];
-      _addMass(startMove.r, startMove.c, botColor);
-      return;
-    }
-
-    // EVALUACIÓN TÁCTICA 
-    let bestMove = null;
-    let highestScore = -99999;
-
-    for (const move of validMoves) {
-      let score = 0;
-      const r = move.r; const c = move.c;
-      
-      if (move.mass === 3) score += 80;  
-      if (move.mass === 2) score += 40;  
-      if (move.mass === 1) score += 10;
-
-      const neighbors = [ {rr: r-1, cc: c}, {rr: r+1, cc: c}, {rr: r, cc: c-1}, {rr: r, cc: c+1} ];
-      
-      for (const n of neighbors) {
-        if (n.rr >= 0 && n.rr < BOARD_SIZE && n.cc >= 0 && n.cc < BOARD_SIZE) {
-          const neighbor = board[n.rr][n.cc];
-          
-          if (neighbor.owner === enemyColor) {
-            if (neighbor.mass === 3) {
-                if (move.mass === 3) score += 10000; 
-                else if (move.mass === 2) score += 5000; 
-                else score += 100;
-            } 
-            else if (neighbor.mass === 2) {
-              if (move.mass === 3) score += 2000;
-              else if (move.mass === 2) score += 500; 
-            }
-            else {
-              if (move.mass === 3) score += 800; 
-            }
-          } else if (neighbor.owner === botColor) {
-            score += 15; 
-          }
-        }
-      }
-
-      score += Math.random() * 10;
-
-      if (score > highestScore) {
-        highestScore = score;
-        bestMove = move;
-      }
-    }
-
-    if (bestMove) { _addMass(bestMove.r, bestMove.c, botColor); } else { _passTurn(); }
-  } catch (err) { console.error("Error en IA:", err); _passTurn(); }
-}
-
-function _checkGameOver() {
-  let pink = 0, blue = 0;
-  const board = window.CW_SESSION.board;
-  for (let r = 0; r < BOARD_SIZE; r++) {
-    for (let c = 0; c < BOARD_SIZE; c++) {
-      if (board[r][c].owner === 'pink') pink++;
-      else if (board[r][c].owner === 'blue') blue++;
-    }
-  }
-  if (_turnCount >= 2) {
-     if (pink === 0 && blue > 0) { _finishGame('blue'); return true; }
-     if (blue === 0 && pink > 0) { _finishGame('pink'); return true; }
-  }
-  return false;
-}
-
-// ⚡ SALIDA BLINDADA (El Rompecadenas)
-async function _finishGame(winnerColor, fromDB = false) {
-  if (!_active) return; 
-  _active = false;
-  
-  clearInterval(_turnTimer); clearInterval(_graceTimer);
-  if (_matchChannel) _matchChannel.unsubscribe();
-  
-  const myColor = window.CW_SESSION.myColor;
-  const win = winnerColor === myColor;
-
-  _$container.innerHTML = `
-    <div class="result-screen" style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:100vh; width: 100%; background:var(--bg-dark); position: absolute; top: 0; left: 0; z-index: 999;">
-      <h1 class="result-title" style="color:var(--text-dim); font-size: 1.4rem;">PROCESANDO...</h1>
-      <p style="color:var(--text-dim);font-family:var(--font-mono);margin-bottom:2rem; text-align:center;">Guardando partida en el servidor</p>
-    </div>
-  `;
-  
-  try {
-    const sb = getSupabase();
-    if (!fromDB && window.CW_SESSION.matchId) {
-       // Await directo, sin trucos ni carreras de tiempo. Aseguramos que Supabase anote el final.
-       await sb.from('matches')
-         .update({ status: 'finished', winner: winnerColor, board_state: window.CW_SESSION.board })
-         .eq('id', window.CW_SESSION.matchId);
-    }
-  } catch (e) { console.error("Error guardando final:", e); }
-
-  _$container.innerHTML = `
-    <div class="result-screen" style="display:flex; flex-direction:column; justify-content:center; align-items:center; height:100vh; width: 100%; background:var(--bg-dark); position: absolute; top: 0; left: 0; z-index: 999;">
-      <h1 class="result-title ${win ? 'result-win' : 'result-lose'}">${win ? '¡VICTORIA!' : 'DERROTA'}</h1>
-      <p style="color:var(--text-dim);font-family:var(--font-mono);margin-bottom:2rem; text-align:center;">${win ? '+50 CP acreditados' : 'Perdiste la batalla'}</p>
-      <button class="btn btn-primary" id="btn-exit" style="width:200px;">VOLVER AL INICIO</button>
-    </div>
-  `;
-  
-  _$container.querySelector('#btn-exit').addEventListener('click', async () => {
-    const $btn = _$container.querySelector('#btn-exit'); 
-    $btn.textContent = "SALIENDO..."; $btn.style.opacity = "0.7"; $btn.style.pointerEvents = "none";
-
-    // DOBLE CANDADO: Forzamos la cancelación por si acaso antes de salir
-    if (window.CW_SESSION && window.CW_SESSION.matchId) {
-        try {
-           const sb = getSupabase();
-           await sb.from('matches').update({ status: 'finished' }).eq('id', window.CW_SESSION.matchId);
-        } catch(e) {}
-    }
-
-    window.CW_SESSION = null; 
-    await reloadProfile(); 
-    setView('dashboard');
-  });
-}
+  if (
