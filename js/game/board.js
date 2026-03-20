@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/game/board.js
- * MONOLITO MAESTRO FINAL: CERO TRABAS + MINIMAX RECUPERADO
+ * MONOLITO MAESTRO: BLINDAJE ANTI-CONGELAMIENTOS Y ERRORES
  * ═══════════════════════════════════════════════════════
  */
 
@@ -137,6 +137,7 @@ function updateDOM() {
   for (let r = 0; r < BOARD_SIZE; r++) {
     for (let c = 0; c < BOARD_SIZE; c++) {
       const state = game.board[r][c]; const dom = cells[idx++];
+      if (!dom) continue; // Blindaje contra errores de renderizado
       dom.className = 'cell';
       if (state.owner === 'pink') { dom.classList.add('cell-pink'); pScore++; }
       else if (state.owner === 'blue') { dom.classList.add('cell-blue'); bScore++; }
@@ -171,10 +172,10 @@ async function _triggerDisconnect(isDisconnected) {
 function _startMasterClock() {
     clearInterval(_masterClockTimer);
     _masterClockTimer = setInterval(() => {
-        if (!_active || _isAnimating) return; // Si hay explosiones o no hay partida, el reloj pausa internamente
+        if (!_active) return clearInterval(_masterClockTimer);
         const now = Date.now();
 
-        // 1. RELOJ DE EMERGENCIA (40s)
+        // 1. UI DE EMERGENCIA (40s)
         if (_isPaused && _dbPausedAt) {
             let left = 40 - Math.floor((now - _dbPausedAt) / 1000);
             const dTimer = _$container.querySelector('#disconnect-timer');
@@ -183,16 +184,15 @@ function _startMasterClock() {
             return; 
         }
 
-        // 2. RELOJ GLOBAL (3 Minutos)
+        // 2. UI RELOJ GLOBAL (Siempre se actualiza)
         let globalLeft = 180 - Math.floor((now - _dbStartTime) / 1000) + _dbTotalPausedSecs;
         const gt = _$container.querySelector('#global-timer');
         if (gt) {
             gt.textContent = `${Math.floor(Math.max(0,globalLeft) / 60).toString().padStart(2, '0')}:${(Math.max(0,globalLeft) % 60).toString().padStart(2, '0')}`;
             if (globalLeft <= 30) gt.style.color = "#ff4444";
         }
-        if (globalLeft <= 0) { _handleTimeOut(); return; }
-
-        // 3. RELOJ DE TURNO (10 Segundos)
+        
+        // 3. UI RELOJ DE TURNO (Siempre se actualiza)
         let turnLeft = 10 - Math.floor((now - _dbLastMoveTime) / 1000);
         const turnEl = _$container.querySelector('#turn-indicator');
         const isMyTurn = _currentTurn === window.CW_SESSION.myColor;
@@ -208,21 +208,31 @@ function _startMasterClock() {
             }
         }
 
-        // 4. LÓGICA DE QUIÉN JUEGA
-        if (!isMyTurn && window.CW_SESSION.isBotMatch) {
-            // El bot dispara su jugada cuando le quedan 8 segundos (para parecer humano)
-            if (turnLeft <= 8) _botMove(); 
-            return; // Detiene el flujo para que no haga más nada hasta que pase el turno
+        // 🚨 BLOQUEO DE ACCIONES: Si el tablero explota, no matamos el tiempo ni pasamos turno
+        if (_isAnimating) return; 
+
+        // 4. LÓGICA DE TIEMPOS AGOTADOS
+        if (globalLeft <= 0) { _handleTimeOut(); return; }
+
+        if (turnLeft <= 0) {
+            if (isMyTurn) {
+                _missedTurns++; 
+                _dbLastMoveTime = now; // Reinicio instantáneo para evitar dobles cobros
+                if (_missedTurns >= 4) {
+                    _finishGame(window.CW_SESSION.myColor==='pink'?'blue':'pink', false, "AFK: Tiempo agotado 4 veces");
+                } else {
+                    showToast(`Turno saltado (${_missedTurns}/4)`, 'warning');
+                    _passTurn();
+                }
+            } else if (window.CW_SESSION.isBotMatch) {
+                // Si el bot se quedó dormido porque el tiempo llegó a cero, lo forzamos a jugar
+                _botMove();
+            }
         }
 
-        if (isMyTurn && turnLeft <= 0) {
-            _missedTurns++; 
-            if (_missedTurns >= 4) {
-                _finishGame(window.CW_SESSION.myColor==='pink'?'blue':'pink', false, "AFK: Tiempo agotado 4 veces");
-            } else {
-                showToast(`Turno saltado (${_missedTurns}/4)`, 'warning');
-                _passTurn();
-            }
+        // 5. INTELIGENCIA DEL BOT (Juega en el segundo 8)
+        if (window.CW_SESSION.isBotMatch && !isMyTurn && turnLeft === 8) {
+            _botMove(); 
         }
 
     }, 1000); 
@@ -243,16 +253,14 @@ function handlePlayerClick(row, col) {
   
   const cell = window.CW_SESSION.board[row][col];
   if (cell.owner && cell.owner !== window.CW_SESSION.myColor) { 
-      showToast('No puedes tocar casillas enemigas', 'error'); 
-      return; 
+      showToast('No puedes tocar casillas enemigas', 'error'); return; 
   }
 
   let ownedCount = 0;
   window.CW_SESSION.board.forEach(r => r.forEach(c => { if(c.owner === window.CW_SESSION.myColor) ownedCount++; }));
   
   if (ownedCount > 0 && cell.owner !== window.CW_SESSION.myColor) { 
-      showToast('Debes expandir tus propias fichas', 'warning'); 
-      return; 
+      showToast('Debes expandir tus propias fichas', 'warning'); return; 
   }
 
   _missedTurns = 0; 
@@ -271,10 +279,18 @@ function _passTurn() {
   updateDOM();
 }
 
+// 🛡️ EL BLINDAJE: try...finally GARANTIZA QUE EL TABLERO NUNCA SE CONGELE
 async function _addMass(row, col, color) {
-  _isAnimating = true; await _processMass(row, col, color);
-  if (_active && !_checkGameOver()) _passTurn();
-  _isAnimating = false;
+  if (_isAnimating) return; // Evita que se dispare dos veces rápido
+  _isAnimating = true; 
+  try {
+      await _processMass(row, col, color);
+      if (_active && !_checkGameOver()) _passTurn();
+  } catch (error) {
+      console.error("Error crítico evitado en explosión:", error);
+  } finally {
+      _isAnimating = false; // SIEMPRE quita la pausa, pase lo que pase
+  }
 }
 
 async function _processMass(row, col, color) {
@@ -296,7 +312,7 @@ async function _explode(row, col, color) {
 }
 
 // ═════════════════════════════════════════════════════════
-// 🧠 MOTOR MINIMAX (Cerebro Cuántico del Bot)
+// 🧠 MOTOR MINIMAX (Bot Cuántico Blindado)
 // ═════════════════════════════════════════════════════════
 function _cloneBoard(board) { return board.map(row => row.map(cell => ({ owner: cell.owner, mass: cell.mass }))); }
 function _getValidMoves(board, color) {
@@ -345,7 +361,7 @@ function _botMove() {
 
     let validMoves = _getValidMoves(board, botColor);
     if (validMoves.length === 0) { _passTurn(); return; }
-    if (validMoves.length === 25) { _addMass(2, 2, botColor); return; } // Primer turno va al centro
+    if (validMoves.length === 25) { _addMass(2, 2, botColor); return; }
 
     let bestMove = validMoves[0]; let bestScore = -Infinity;
     for (const move of validMoves) {
@@ -368,7 +384,10 @@ function _botMove() {
       if (worstCaseScore > bestScore) { bestScore = worstCaseScore; bestMove = move; }
     }
     _addMass(bestMove.r, bestMove.c, botColor);
-  } catch (err) { console.error("Error en Bot:", err); _passTurn(); }
+  } catch (err) { 
+      console.error("El Bot colapsó mentalmente:", err); 
+      _passTurn(); // Si el bot falla, igual pasa el turno para no trancar el juego
+  }
 }
 
 function _checkGameOver() {
@@ -381,7 +400,6 @@ function _checkGameOver() {
   return false;
 }
 
-// ⚡ UI PROFESIONAL: OVERLAY SIN PARPADEO
 async function _finishGame(winnerColor, fromDB = false, customReason = null) {
   if (!_active) return; _active = false;
   clearInterval(_masterClockTimer);
