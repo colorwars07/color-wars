@@ -1,3 +1,9 @@
+/**
+ * ═══════════════════════════════════════════════════════
+ * COLOR WARS — js/game/board.js
+ * LA ARENA FINAL (Opción A + 3 Minutos + Anti-Bucles)
+ * ═══════════════════════════════════════════════════════
+ */
 import { registerView, showToast, escHtml } from '../core/app.js';
 import { setView } from '../core/state.js';
 import { getSupabase } from '../core/supabase.js';
@@ -92,7 +98,6 @@ function renderHTML() {
     const cell = e.target.closest('.cell'); if (cell) handlePlayerClick(parseInt(cell.dataset.r), parseInt(cell.dataset.c));
   });
   
-  // 🚀 BOTÓN ABANDONAR: VA DIRECTO A DERROTA SIN BLOQUEAR
   _$container.querySelector('#btn-surrender').addEventListener('click', () => {
      if (!confirm("¿Seguro que quieres abandonar? La victoria será de tu rival.")) return;
      const winnerColor = window.CW_SESSION.myColor === 'pink' ? 'blue' : 'pink';
@@ -122,6 +127,7 @@ function updateDOM() {
   else { if(sy) sy.textContent = bS; if(sr) sr.textContent = pS; }
 }
 
+// 🧮 OPCIÓN A: Juez de 3 Minutos
 function _resolveTimeOutWinner() {
     let pCells = 0, bCells = 0, pMass = 0, bMass = 0;
     window.CW_SESSION.board.forEach(row => row.forEach(c => { 
@@ -138,6 +144,7 @@ function _startMasterClock() {
         if (!_active) return clearInterval(_masterClockTimer);
         const now = Date.now();
 
+        // CAÍDA DE RED
         if (!window.CW_SESSION.isBotMatch) {
             const timeWithoutInternet = Math.floor((now - _lastDBUpdateTime) / 1000);
             if (timeWithoutInternet >= 40) {
@@ -146,6 +153,7 @@ function _startMasterClock() {
             }
         }
 
+        // RELOJ GLOBAL DE 3 MINUTOS (FUNCIONANDO)
         let globalLeft = 180 - Math.floor((now - _dbStartTime) / 1000);
         const gt = _$container.querySelector('#global-timer');
         if (globalLeft < 0) globalLeft = 0; 
@@ -155,6 +163,7 @@ function _startMasterClock() {
             const winner = _resolveTimeOutWinner(); _finishGame(winner, false, "TIEMPO AGOTADO (VICTORIA POR PUNTOS)"); return; 
         }
 
+        // RELOJ 10s TURNO
         let turnLeft = 10 - Math.floor((now - _dbLastMoveTime) / 1000);
         const turnEl = _$container.querySelector('#turn-indicator');
         const isMyTurn = _currentTurn === window.CW_SESSION.myColor;
@@ -175,26 +184,21 @@ function _startMasterClock() {
     }, 1000);
 }
 
-// 🚀 REGLA ESTRICTA DE MECÁNICA DEL JUEGO: SOLO TUS FICHAS
+// 🚀 REGLA DE MECÁNICA ESTRICTA
 function handlePlayerClick(row, col) {
   if (!_active || _isAnimating || _currentTurn !== window.CW_SESSION.myColor) return;
   const cell = window.CW_SESSION.board[row][col];
   const myColor = window.CW_SESSION.myColor;
 
-  // Contamos cuántas fichas tienes tú en el tablero
   let myPieces = 0;
   window.CW_SESSION.board.forEach(r => r.forEach(c => { if (c.owner === myColor) myPieces++; }));
 
-  // Si ya tienes fichas, ESTÁS OBLIGADO a tocar las tuyas. No puedes tocar espacios en blanco.
   if (myPieces > 0 && cell.owner !== myColor) {
-      showToast("Solo puedes presionar tus propias fichas para expandirlas", "warning");
-      return; 
+      showToast("Solo puedes presionar tus propias fichas para expandirlas", "warning"); return; 
   }
-  // No puedes tocar las fichas del enemigo obviamente
   if (cell.owner && cell.owner !== myColor) return;
 
-  _missedTurns = 0; 
-  _addMass(row, col, myColor);
+  _missedTurns = 0; _addMass(row, col, myColor);
 }
 
 async function _addMass(row, col, color) {
@@ -218,7 +222,6 @@ async function _explode(row, col, color) {
   for (const pos of n) await _processMass(pos.row, pos.col, color);
 }
 
-// Ya no hay await aquí trancando el código
 function _passTurn() {
   _currentTurn = _currentTurn === 'pink' ? 'blue' : 'pink';
   _dbLastMoveTime = Date.now(); _turnCount++; updateDOM();
@@ -227,23 +230,16 @@ function _passTurn() {
   }
 }
 
-// 🧠 BOT MINIMAX ADAPTADO A LA NUEVA REGLA (SOLO TOCA LO SUYO SI YA TIENE FICHAS)
 function _botMove() {
   const botColor = window.CW_SESSION.myColor === 'pink' ? 'blue' : 'pink';
   const board = window.CW_SESSION.board;
-  
   let myPieces = 0;
   board.forEach(r => r.forEach(c => { if(c.owner === botColor) myPieces++; }));
 
   let validMoves = [];
-  for(let r=0; r<5; r++) {
-      for(let c=0; c<5; c++) {
-          if (myPieces > 0) {
-              if (board[r][c].owner === botColor) validMoves.push({r,c});
-          } else {
-              if (!board[r][c].owner) validMoves.push({r,c});
-          }
-      }
+  for(let r=0; r<5; r++) for(let c=0; c<5; c++) {
+      if (myPieces > 0) { if (board[r][c].owner === botColor) validMoves.push({r,c}); } 
+      else { if (!board[r][c].owner) validMoves.push({r,c}); }
   }
 
   if (validMoves.length === 0) { _botIsMoving = false; return; }
@@ -278,8 +274,8 @@ function _checkGameOver() {
   return false;
 }
 
-// 🚀 BOTÓN VOLVER AL MENÚ: DISPARA Y OLVIDA (Sin bloqueos, sin recarga de página)
-function _finishGame(winnerColor, fromDB = false, reason = null) {
+// 🛡️ EL BOTÓN DE SALIDA INFALIBLE
+async function _finishGame(winnerColor, fromDB = false, reason = null) {
   if (!_active) return; 
   _active = false;
   
@@ -300,23 +296,21 @@ function _finishGame(winnerColor, fromDB = false, reason = null) {
   `;
   document.body.appendChild(overlay);
 
-  document.getElementById('btn-return-dash-final').addEventListener('click', () => {
+  document.getElementById('btn-return-dash-final').addEventListener('click', async () => {
      const btn = document.getElementById('btn-return-dash-final');
      btn.textContent = "SALIENDO..."; btn.disabled = true;
      
-     // Envía a DB pero NO TE BLOQUEA LA SALIDA
+     // 1. ESPERAMOS A QUE SUPABASE TERMINE LA PARTIDA A JURO
      if (window.CW_SESSION && window.CW_SESSION.matchId) {
-         getSupabase().from('matches').update({ status:'finished' }).eq('id', window.CW_SESSION.matchId).catch(()=>{});
+         await getSupabase().from('matches').update({ status:'finished' }).eq('id', window.CW_SESSION.matchId).catch(()=>{});
      }
      
-     // Limpia sesión para evitar fantasmas
+     // 2. Limpiamos la memoria local
      window.CW_SESSION = null; 
-     for (let key in localStorage) {
-        if (key.toLowerCase().includes('match') || key.toLowerCase().includes('session')) localStorage.removeItem(key);
-     }
      
+     // 3. Salida suave e instantánea al dashboard
      document.body.removeChild(overlay); 
-     setView('dashboard'); // Volvemos al dashboard con fluidez instantánea
+     setView('dashboard'); 
   });
 
   if (!fromDB && window.CW_SESSION.matchId) {
