@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/game/board.js
- * V8.0 FINAL (ESTÉTICA + MOTORES + MUERTE SÚBITA POR PUNTOS)
+ * V9.0 (EXORCISMO DE FANTASMAS + HARD RESET AL MENÚ)
  * ═══════════════════════════════════════════════════════
  */
 import { registerView, showToast, escHtml } from '../core/app.js';
@@ -27,7 +27,7 @@ registerView('game', initGameView);
 export async function initGameView($container) {
   _$container = $container;
   if (!window.CW_SESSION || !window.CW_SESSION.board) { 
-      setView('dashboard'); 
+      window.location.href = '/'; 
       return; 
   }
 
@@ -39,9 +39,9 @@ export async function initGameView($container) {
     try {
       const { data: matchData } = await sb.from('matches').select('*').eq('id', window.CW_SESSION.matchId).single();
       if (matchData) {
-        if (matchData.status === 'finished') {
+        if (matchData.status === 'finished' || matchData.status === 'cancelled') {
            window.CW_SESSION = null;
-           setView('dashboard');
+           window.location.href = '/';
            return;
         }
 
@@ -76,7 +76,7 @@ function _startPolling() {
       if (error) throw error;
 
       if (data) {
-        _lastDBUpdateTime = Date.now(); // 🟢 Hay internet
+        _lastDBUpdateTime = Date.now(); 
         if (data.status === 'finished' && data.winner) {
            _finishGame(data.winner, true);
            return;
@@ -89,7 +89,7 @@ function _startPolling() {
            updateDOM();
         }
       }
-    } catch(e) { /* Silencio en errores de red pasajeros */ }
+    } catch(e) { /* Silencio en fallos de red */ }
   }, 1500);
 }
 
@@ -149,26 +149,16 @@ function updateDOM() {
   else { if(sy) sy.textContent = bS; if(sr) sr.textContent = pS; }
 }
 
-// 🧮 EL JUEZ DE LA MUERTE SÚBITA (OPCIÓN A)
 function _resolveTimeOutWinner() {
     let pCells = 0, bCells = 0, pMass = 0, bMass = 0;
-    
-    // Contamos casillas y masa
     window.CW_SESSION.board.forEach(row => row.forEach(c => { 
       if(c.owner === 'pink') { pCells++; pMass += c.mass; }
       else if(c.owner === 'blue') { bCells++; bMass += c.mass; }
     }));
-    
-    // Regla 1: Territorio (El que tenga más cuadros controlados)
     if (pCells > bCells) return 'pink';
     if (bCells > pCells) return 'blue';
-    
-    // Regla 2: Masa (Si están empatados en territorio, gana el de más puntos)
     if (pMass > bMass) return 'pink';
     if (bMass > pMass) return 'blue';
-    
-    // Regla 3: Empate matemático absoluto (Mismas casillas, misma masa). 
-    // Como NO HAY EMPATES, pierde el jugador que dejó que se agotara el reloj pensando.
     return _currentTurn === 'pink' ? 'blue' : 'pink'; 
 }
 
@@ -178,7 +168,6 @@ function _startMasterClock() {
         if (!_active) return clearInterval(_masterClockTimer);
         const now = Date.now();
 
-        // 1️⃣ TIMER DE 40s (SE CAYÓ EL INTERNET)
         if (!window.CW_SESSION.isBotMatch) {
             const timeWithoutInternet = Math.floor((now - _lastDBUpdateTime) / 1000);
             if (timeWithoutInternet >= 40) {
@@ -187,18 +176,16 @@ function _startMasterClock() {
             }
         }
 
-        // 2️⃣ TIMER GLOBAL (3 MINUTOS) + JUEZ DE MUERTE SÚBITA
         let globalLeft = 180 - Math.floor((now - _dbStartTime) / 1000);
         const gt = _$container.querySelector('#global-timer');
         if (gt) gt.textContent = `${Math.floor(Math.max(0,globalLeft) / 60).toString().padStart(2, '0')}:${(Math.max(0,globalLeft) % 60).toString().padStart(2, '0')}`;
         
         if (globalLeft <= 0) { 
-            const winner = _resolveTimeOutWinner(); // 🚀 LLAMAMOS AL JUEZ
+            const winner = _resolveTimeOutWinner(); 
             _finishGame(winner, false, "TIEMPO AGOTADO (VICTORIA POR PUNTOS)"); 
             return; 
         }
 
-        // 3️⃣ TIMER DE TURNO (10 SEGUNDOS)
         let turnLeft = 10 - Math.floor((now - _dbLastMoveTime) / 1000);
         const turnEl = _$container.querySelector('#turn-indicator');
         const isMyTurn = _currentTurn === window.CW_SESSION.myColor;
@@ -283,7 +270,6 @@ async function _passTurn() {
   }
 }
 
-// 🧠 MOTOR DE INTELIGENCIA DEL BOT (MINIMAX)
 function _botMove() {
   const botColor = window.CW_SESSION.myColor === 'pink' ? 'blue' : 'pink';
   const board = window.CW_SESSION.board;
@@ -302,7 +288,7 @@ function _botMove() {
 
   for (let move of validMoves) {
       let score = _evaluateBoardState(board, move.r, move.c, botColor);
-      score += Math.random() * 0.5; // Ruido para no ser 100% predecible
+      score += Math.random() * 0.5; 
       if (score > maxScore) { maxScore = score; bestMove = move; }
   }
   _addMass(bestMove.r, bestMove.c, botColor);
@@ -320,8 +306,8 @@ function _evaluateBoardState(board, r, c, color) {
           const adj = board[n.r][n.c];
           if (adj.owner && adj.owner !== color) {
               if (adj.mass === 3) {
-                  if (target.mass === 3) score += 100; // ¡Explotar para comer!
-                  else score -= 20; // Peligro
+                  if (target.mass === 3) score += 100; 
+                  else score -= 20; 
               } else { score += adj.mass; } 
           }
       }
@@ -367,10 +353,9 @@ async function _finishGame(winnerColor, fromDB = false, reason = null) {
   
   document.body.appendChild(overlay);
 
+  // 🚀 HARD RESET: ESTO EVITA LA PANTALLA EN NEGRO Y LOS FANTASMAS
   document.getElementById('btn-return-dash-final').addEventListener('click', () => {
-     document.body.removeChild(overlay); 
-     window.CW_SESSION = null; 
-     setView('dashboard'); 
+     window.location.href = '/'; 
   });
 
   if (!fromDB && window.CW_SESSION.matchId) {
