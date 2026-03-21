@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/game/matchmaking.js
- * EMPAREJAMIENTO V2.0 (TU ESTÉTICA + LIMPIEZA TOTAL)
+ * EMPAREJAMIENTO V3.0 (MOTOR 4x4 / INMUNE A DESCONEXIONES)
  * ═══════════════════════════════════════════════════════
  */
 import { registerView, showToast, escHtml } from '../core/app.js';
@@ -12,9 +12,10 @@ registerView('matchmaking', initMatchmaking);
 
 let _searchTimer = null;
 let _countdownTimer = null;
-let _matchChannel = null;   
+let _pollTimer = null;      // 🚀 EL MOTOR 4x4 DE BÚSQUEDA
 let _currentMatchId = null; 
 const ENTRY_FEE = 30; 
+const SEARCH_TIMEOUT_MS = 20000; // 🚀 20 SEGUNDOS DE ESPERA (Antes 15)
 
 const VZLA_NAMES = [
   "Maikol", "El Bryan", "La Catira", "Yuridia", "El Gocho", "La Chama", "Yuleisi",
@@ -22,11 +23,10 @@ const VZLA_NAMES = [
 ];
 
 export async function initMatchmaking($container) {
-  // 🧹 LIMPIEZA DE MEMORIA: Antes de empezar, matamos cualquier proceso viejo
+  // 🧹 LIMPIEZA TOTAL DE MEMORIA
   clearTimeout(_searchTimer);
   clearInterval(_countdownTimer);
-  const sb = getSupabase();
-  if (_matchChannel) sb.removeChannel(_matchChannel);
+  clearInterval(_pollTimer); 
   window.CW_SESSION = null; 
 
   const profile = getProfile();
@@ -41,9 +41,10 @@ export async function initMatchmaking($container) {
   _currentMatchId = null;
   renderSearchScreen($container);
   
+  const sb = getSupabase();
   try {
       await sb.rpc('limpiar_fantasmas', { jugador_id: profile.id });
-  } catch (e) { console.error("Limpiador falló:", e); }
+  } catch (e) { console.warn("Limpiador falló silenciosamente"); }
 
   startSearch($container, profile);
 }
@@ -82,6 +83,7 @@ async function startSearch($c, profile) {
   const sb = getSupabase();
 
   try {
+    // 1. BUSCAMOS SI ALGUIEN YA ESTÁ ESPERANDO
     const { data: waitingMatch, error: searchErr } = await sb
       .from('matches')
       .select('*')
@@ -93,7 +95,7 @@ async function startSearch($c, profile) {
     if (searchErr) throw searchErr;
 
     if (waitingMatch) {
-      // Entrar como Azul a una partida existente
+      // 🚀 ¡ENCONTRAMOS A ALGUIEN! ENTRAR COMO AZUL
       const { data: joinedMatch } = await sb.from('matches')
         .update({ 
             player_blue: profile.id, 
@@ -118,7 +120,7 @@ async function startSearch($c, profile) {
       startCountdown($c);
 
     } else {
-      // Crear nueva partida y esperar
+      // 🚀 NADIE ESPERA. CREAMOS PARTIDA Y NOS PONEMOS A ESPERAR (MOTOR 4x4)
       const { data: newMatch, error: insertErr } = await sb.from('matches').insert([{
         player_pink: profile.id, status: 'waiting'
       }]).select().single();
@@ -126,28 +128,40 @@ async function startSearch($c, profile) {
       if (insertErr) throw insertErr;
       _currentMatchId = newMatch.id;
 
-      _matchChannel = sb.channel(`match_${newMatch.id}`)
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${newMatch.id}` }, async (payload) => {
-          if (payload.new.status === 'playing' && payload.new.player_blue !== 'BOT') {
+      // 🔥 ARRANCAMOS EL MOTOR 4x4 (Preguntamos cada 1 segundo si alguien entró)
+      _pollTimer = setInterval(async () => {
+        try {
+          const { data: checkData } = await sb.from('matches')
+            .select('status, player_blue')
+            .eq('id', _currentMatchId)
+            .single();
+
+          if (checkData && checkData.status === 'playing' && checkData.player_blue !== 'BOT') {
+            // ¡ALGUIEN ENTRÓ! Apagamos los motores y arrancamos
+            clearInterval(_pollTimer);
             clearTimeout(_searchTimer); 
-            sb.removeChannel(_matchChannel); 
+            
             await payEntryFee();
 
-            const { data: oppData } = await sb.from('users').select('username').eq('id', payload.new.player_blue).single();
+            const { data: oppData } = await sb.from('users').select('username').eq('id', checkData.player_blue).single();
             const rivalName = oppData?.username || "Jugador";
 
             window.CW_SESSION = {
-              isBotMatch: false, matchId: newMatch.id, myColor: 'pink', rivalName: rivalName,
+              isBotMatch: false, matchId: _currentMatchId, myColor: 'pink', rivalName: rivalName,
               board: Array(5).fill(null).map(() => Array(5).fill(null).map(() => ({ owner: null, mass: 0 })))
             };
 
             renderCountdownScreen($c, profile.username, rivalName, "Empiezas tú (ROSA)");
             startCountdown($c);
           }
-        }).subscribe();
+        } catch(e) { console.warn("Fallo de red consultando rival..."); }
+      }, 1000);
 
-      // Tiempo de espera para el Bot (15 segundos)
-      _searchTimer = setTimeout(() => { setupBotMatchFallback($c, profile); }, 15000); 
+      // Tiempo límite: Si en 20s nadie entra, mandamos al Bot
+      _searchTimer = setTimeout(() => { 
+          clearInterval(_pollTimer); // Apagamos el motor de búsqueda
+          setupBotMatchFallback($c, profile); 
+      }, SEARCH_TIMEOUT_MS); 
     }
   } catch (err) { 
       console.error(err);
@@ -158,17 +172,22 @@ async function startSearch($c, profile) {
 function cancelSearch() {
   const $btn = document.getElementById('btn-cancel-search');
   if($btn) { $btn.textContent = "CANCELANDO..."; $btn.style.opacity = '0.5'; $btn.style.pointerEvents = 'none'; }
-  clearTimeout(_searchTimer); clearInterval(_countdownTimer);
+  
+  clearTimeout(_searchTimer); 
+  clearInterval(_countdownTimer);
+  clearInterval(_pollTimer); // Apagamos el motor 4x4
+  
   const sb = getSupabase();
-  if (_matchChannel) sb.removeChannel(_matchChannel);
-  if (_currentMatchId) { sb.from('matches').update({ status: 'cancelled' }).eq('id', _currentMatchId); }
-  _currentMatchId = null; setView('dashboard');
+  if (_currentMatchId) { 
+      // Cerramos la partida silenciosamente para que nadie entre por error
+      sb.from('matches').update({ status: 'cancelled' }).eq('id', _currentMatchId).catch(()=>{}); 
+  }
+  _currentMatchId = null; 
+  setView('dashboard');
 }
 
 async function setupBotMatchFallback($c, profile) {
   const sb = getSupabase();
-  if (_matchChannel) sb.removeChannel(_matchChannel);
-
   try {
     if(_currentMatchId) {
         const {data: checkMatch} = await sb.from('matches').select('status').eq('id', _currentMatchId).single();
@@ -177,7 +196,6 @@ async function setupBotMatchFallback($c, profile) {
     
     const isUserPink = Math.random() > 0.5;
     const randomName = VZLA_NAMES[Math.floor(Math.random() * VZLA_NAMES.length)];
-    
     const startTime = new Date().toISOString();
 
     if (_currentMatchId) {
@@ -189,7 +207,6 @@ async function setupBotMatchFallback($c, profile) {
         last_move_time: startTime
       }).eq('id', _currentMatchId);
     } else {
-        // Por si acaso no había matchId creado
         const { data: newMatch } = await sb.from('matches').insert([{
             player_pink: isUserPink ? profile.id : 'BOT',
             player_blue: isUserPink ? 'BOT' : profile.id,
