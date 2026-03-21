@@ -1,270 +1,282 @@
-/**
- * ═══════════════════════════════════════════════════════
- * COLOR WARS — js/game/matchmaking.js
- * V4.0 (MOTOR 4x4 + HARD RESET EN BOTÓN CANCELAR)
- * ═══════════════════════════════════════════════════════
- */
 import { registerView, showToast, escHtml } from '../core/app.js';
-import { getProfile, setProfile, setView } from '../core/state.js';
+import { setView } from '../core/state.js';
 import { getSupabase } from '../core/supabase.js';
 
-registerView('matchmaking', initMatchmaking);
+const BOARD_SIZE = 5;
+let _active = false;
+let _currentTurn = 'pink';
+let _isAnimating = false;
+let _turnCount = 0;
+let _missedTurns = 0;
+let _$container = null;
+let _masterClockTimer = null;
+let _pollTimer = null;
+let _dbStartTime = null;
+let _dbLastMoveTime = null;
+let _lastDBUpdateTime = null; 
+let _botIsMoving = false;
 
-let _searchTimer = null;
-let _countdownTimer = null;
-let _pollTimer = null;      
-let _currentMatchId = null; 
-const ENTRY_FEE = 30; 
-const SEARCH_TIMEOUT_MS = 20000; 
+registerView('game', initGameView);
 
-const VZLA_NAMES = [
-  "Maikol", "El Bryan", "La Catira", "Yuridia", "El Gocho", "La Chama", "Yuleisi",
-  "El Chino", "Juancho", "Dayana", "El Portugués", "El Convive", "Yordano", "Cristian"
-];
-
-export async function initMatchmaking($container) {
-  clearTimeout(_searchTimer);
-  clearInterval(_countdownTimer);
-  clearInterval(_pollTimer); 
-  window.CW_SESSION = null; 
-
-  const profile = getProfile();
-  if (!profile) { 
-      window.location.href = '/'; 
-      return; 
+export async function initGameView($container) {
+  _$container = $container;
+  if (!window.CW_SESSION || !window.CW_SESSION.board) { 
+      window.CW_SESSION = null; setView('dashboard'); return; 
   }
 
-  if (profile.wallet_bs < ENTRY_FEE) {
-    showToast(`Saldo insuficiente. Necesitas ${ENTRY_FEE} CP.`, 'error');
-    window.location.href = '/';
-    return;
-  }
-
-  _currentMatchId = null;
-  renderSearchScreen($container);
-  
+  _active = true; _isAnimating = false; _turnCount = 0; _missedTurns = 0; _botIsMoving = false;
+  _lastDBUpdateTime = Date.now();
   const sb = getSupabase();
-  try {
-      await sb.rpc('limpiar_fantasmas', { jugador_id: profile.id });
-  } catch (e) { console.warn("Limpiador silencioso"); }
 
-  startSearch($container, profile);
+  if (window.CW_SESSION.matchId) {
+    try {
+      const { data: matchData } = await sb.from('matches').select('*').eq('id', window.CW_SESSION.matchId).single();
+      if (matchData) {
+        // ANTI-FANTASMAS: Si entras y la partida ya acabó, aborta la misión de inmediato.
+        if (matchData.status === 'finished' || matchData.status === 'cancelled') {
+           window.CW_SESSION = null; setView('dashboard'); return;
+        }
+        window.CW_SESSION.board = matchData.board_state || window.CW_SESSION.board;
+        _currentTurn = matchData.current_turn || 'pink';
+        _dbStartTime = matchData.match_start_time ? new Date(matchData.match_start_time).getTime() : Date.now();
+        _dbLastMoveTime = Date.now();
+      }
+    } catch(e) {}
+
+    if (!window.CW_SESSION.isBotMatch) _startPolling();
+  }
+
+  renderHTML(); updateDOM(); _startMasterClock();
 }
 
-function renderSearchScreen($c) {
-  $c.innerHTML = `
-  <div class="mm-screen">
-    <div style="display:flex; flex-direction:column; align-items:center; gap:2rem;">
-      <div class="mm-ring"><span style="font-size:1.5rem;">⚔️</span></div>
-      <div style="text-align:center;">
-        <h2 style="font-family:var(--font-display); font-size:1.2rem; letter-spacing:0.2em; color:var(--text-bright); margin-bottom:0.5rem;">BUSCANDO RIVAL</h2>
-        <p style="font-family:var(--font-mono); font-size:0.75rem; color:var(--text-dim); text-transform:uppercase;">Conectando con la arena...</p>
-      </div>
-      <button id="btn-cancel-search" class="btn btn-ghost" style="margin-top:2rem;">✕ CANCELAR</button>
+function _startPolling() {
+  clearInterval(_pollTimer);
+  _pollTimer = setInterval(async () => {
+    if (!_active || _isAnimating) return;
+    try {
+      const { data } = await getSupabase().from('matches').select('board_state, current_turn, last_move_time, status, winner').eq('id', window.CW_SESSION.matchId).single();
+      if (data) {
+        _lastDBUpdateTime = Date.now(); 
+        if (data.status === 'finished' && data.winner) { _finishGame(data.winner, true); return; }
+        if (data.current_turn === window.CW_SESSION.myColor && _currentTurn !== window.CW_SESSION.myColor) {
+           window.CW_SESSION.board = data.board_state; _currentTurn = data.current_turn;
+           _dbLastMoveTime = new Date(data.last_move_time).getTime(); _missedTurns = 0; updateDOM();
+        }
+      }
+    } catch(e) {}
+  }, 1500);
+}
+
+function renderHTML() {
+  const myColor = window.CW_SESSION.myColor;
+  const rivalName = window.CW_SESSION.rivalName || window.CW_SESSION.botName || 'RIVAL';
+  const youColorVar = myColor === 'pink' ? 'var(--pink)' : 'var(--blue)';
+  const rivalColorVar = myColor === 'pink' ? 'var(--blue)' : 'var(--pink)';
+
+  _$container.innerHTML = `
+  <div class="game-arena">
+    <div style="background: rgba(10, 10, 15, 0.9); border: 1px solid var(--border-ghost); border-radius: 14px; padding: 12px; margin-bottom: 20px; width: 95%; max-width: 380px; display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+            <div style="width: 30%;"><span style="color:${youColorVar}; font-size: 0.6rem; font-weight: 800;">TÚ</span><br><span style="font-size: 1.2rem; font-weight: 900;" id="score-you">0</span></div>
+            <div style="width: 40%; text-align: center;"><span id="global-timer" style="color: #ffaa00; font-family: var(--font-display); font-size: 1.8rem;">03:00</span></div>
+            <div style="width: 30%; text-align: right;"><span style="color:${rivalColorVar}; font-size: 0.6rem; font-weight: 800;">${escHtml(rivalName)}</span><br><span style="font-size: 1.2rem; font-weight: 900;" id="score-rival">0</span></div>
+        </div>
+        <div style="text-align: center;"><span id="turn-indicator" style="font-family: var(--font-mono); font-size: 0.8rem; font-weight: bold; color: white;">PREPARANDO...</span></div>
     </div>
+    <div class="board-wrap"><div class="board-grid" id="grid" style="display:grid; grid-template-columns:repeat(5,1fr); gap:5px;">
+        ${window.CW_SESSION.board.map((row, r) => row.map((_, c) => `<div class="cell" data-r="${r}" data-c="${c}"><div class="cell-mass"></div></div>`).join('')).join('')}
+    </div></div>
+    <button id="btn-surrender" class="btn btn-ghost" style="margin-top:20px;">🏳️ Abandonar</button>
   </div>`;
-  $c.querySelector('#btn-cancel-search').addEventListener('click', cancelSearch);
+
+  _$container.querySelector('#grid').addEventListener('click', (e) => {
+    const cell = e.target.closest('.cell'); if (cell) handlePlayerClick(parseInt(cell.dataset.r), parseInt(cell.dataset.c));
+  });
+  
+  // ABANDONAR -> TE MANDA A LA PANTALLA DE DERROTA
+  _$container.querySelector('#btn-surrender').addEventListener('click', async () => {
+     if (!confirm("¿Seguro que quieres abandonar?")) return;
+     const winnerColor = window.CW_SESSION.myColor === 'pink' ? 'blue' : 'pink';
+     await _finishGame(winnerColor, false, "Abandonaste la partida");
+  });
 }
 
-async function payEntryFee() {
-  const profile = getProfile();
-  const sb = getSupabase();
-  try {
-    const { data: cobroExitoso, error } = await sb.rpc('cobrar_entrada', {
-      jugador_id: profile.id, costo: ENTRY_FEE
-    });
-    if (error) throw error;
-    if (cobroExitoso) {
-      const newBalance = Number(profile.wallet_bs) - ENTRY_FEE;
-      setProfile({ ...profile, wallet_bs: newBalance });
+function updateDOM() {
+  if (!_active) return;
+  const game = window.CW_SESSION;
+  const cells = _$container.querySelectorAll('.cell');
+  let pS = 0, bS = 0, idx = 0;
+  for (let r = 0; r < BOARD_SIZE; r++) {
+    for (let c = 0; c < BOARD_SIZE; c++) {
+      const state = game.board[r][c]; const dom = cells[idx++];
+      if (!dom) continue;
+      dom.className = 'cell';
+      if (state.owner === 'pink') { dom.classList.add('cell-pink'); pS++; }
+      else if (state.owner === 'blue') { dom.classList.add('cell-blue'); bS++; }
+      let orbs = ''; for(let i=0; i<state.mass; i++) orbs += `<div class="mass-orb"></div>`;
+      dom.querySelector('.cell-mass').innerHTML = orbs;
     }
-  } catch(e) { console.error("Error cobrando:", e); }
+  }
+  const myColor = window.CW_SESSION.myColor;
+  const sy = _$container.querySelector('#score-you'), sr = _$container.querySelector('#score-rival');
+  if (myColor === 'pink') { if(sy) sy.textContent = pS; if(sr) sr.textContent = bS; }
+  else { if(sy) sy.textContent = bS; if(sr) sr.textContent = pS; }
 }
 
-async function startSearch($c, profile) {
-  const sb = getSupabase();
+function _resolveTimeOutWinner() {
+    let pCells = 0, bCells = 0, pMass = 0, bMass = 0;
+    window.CW_SESSION.board.forEach(row => row.forEach(c => { 
+      if(c.owner === 'pink') { pCells++; pMass += c.mass; } else if(c.owner === 'blue') { bCells++; bMass += c.mass; }
+    }));
+    if (pCells > bCells) return 'pink'; if (bCells > pCells) return 'blue';
+    if (pMass > bMass) return 'pink'; if (bMass > pMass) return 'blue';
+    return _currentTurn === 'pink' ? 'blue' : 'pink'; 
+}
 
-  try {
-    const { data: waitingMatch, error: searchErr } = await sb
-      .from('matches')
-      .select('*')
-      .eq('status', 'waiting')
-      .neq('player_pink', profile.id) 
-      .limit(1)
-      .maybeSingle();
+function _startMasterClock() {
+    clearInterval(_masterClockTimer);
+    _masterClockTimer = setInterval(() => {
+        if (!_active) return clearInterval(_masterClockTimer);
+        const now = Date.now();
 
-    if (searchErr) throw searchErr;
+        if (!window.CW_SESSION.isBotMatch) {
+            const timeWithoutInternet = Math.floor((now - _lastDBUpdateTime) / 1000);
+            if (timeWithoutInternet >= 40) {
+                const rivalColor = window.CW_SESSION.myColor === 'pink' ? 'blue' : 'pink';
+                _finishGame(rivalColor, false, "EL RIVAL PERDIÓ LA CONEXIÓN"); return;
+            }
+        }
 
-    if (waitingMatch) {
-      const { data: joinedMatch } = await sb.from('matches')
-        .update({ 
-            player_blue: profile.id, 
-            status: 'playing',
-            match_start_time: new Date().toISOString(),
-            last_move_time: new Date().toISOString()
-        })
-        .eq('id', waitingMatch.id)
-        .select().single();
+        let globalLeft = 180 - Math.floor((now - _dbStartTime) / 1000);
+        const gt = _$container.querySelector('#global-timer');
+        if (gt) gt.textContent = `${Math.floor(Math.max(0,globalLeft) / 60).toString().padStart(2, '0')}:${(Math.max(0,globalLeft) % 60).toString().padStart(2, '0')}`;
+        
+        if (globalLeft <= 0) { 
+            const winner = _resolveTimeOutWinner(); _finishGame(winner, false, "TIEMPO AGOTADO (VICTORIA POR PUNTOS)"); return; 
+        }
 
-      await payEntryFee();
+        let turnLeft = 10 - Math.floor((now - _dbLastMoveTime) / 1000);
+        const turnEl = _$container.querySelector('#turn-indicator');
+        const isMyTurn = _currentTurn === window.CW_SESSION.myColor;
 
-      const { data: oppData } = await sb.from('users').select('username').eq('id', waitingMatch.player_pink).single();
-      const rivalName = oppData?.username || "Jugador";
+        if (turnEl) turnEl.innerHTML = isMyTurn ? `<span style="color:var(--pink);">TU TURNO: ${Math.max(0, turnLeft)}s</span>` : `<span style="color:#aaa;">ESPERANDO RIVAL: ${Math.max(0, turnLeft)}s</span>`;
 
-      window.CW_SESSION = {
-        isBotMatch: false, matchId: joinedMatch.id, myColor: 'blue', rivalName: rivalName,
-        board: Array(5).fill(null).map(() => Array(5).fill(null).map(() => ({ owner: null, mass: 0 })))
-      };
+        if (turnLeft <= 0 && !_isAnimating) {
+            if (isMyTurn) {
+                _missedTurns++; _dbLastMoveTime = now;
+                if (_missedTurns >= 4) _finishGame(window.CW_SESSION.myColor==='pink'?'blue':'pink', false, "ELIMINADO POR AFK");
+                else { showToast(`¡TURNO SALTADO! (${_missedTurns}/4)`, 'warning'); _passTurn(); }
+            } else if (window.CW_SESSION.isBotMatch && !_botIsMoving) { _botIsMoving = true; _botMove(); }
+        }
+        
+        if (window.CW_SESSION.isBotMatch && !isMyTurn && turnLeft <= 8 && !_isAnimating && !_botIsMoving) {
+            _botIsMoving = true; setTimeout(() => { _botMove(); }, 600);
+        }
+    }, 1000);
+}
 
-      renderCountdownScreen($c, profile.username, rivalName, "Juegas de segundo (AZUL)");
-      startCountdown($c);
+function handlePlayerClick(row, col) {
+  if (!_active || _isAnimating || _currentTurn !== window.CW_SESSION.myColor) return;
+  const cell = window.CW_SESSION.board[row][col];
+  if (cell.owner && cell.owner !== window.CW_SESSION.myColor) return;
+  _missedTurns = 0; _addMass(row, col, window.CW_SESSION.myColor);
+}
 
-    } else {
-      const { data: newMatch, error: insertErr } = await sb.from('matches').insert([{
-        player_pink: profile.id, status: 'waiting'
-      }]).select().single();
+async function _addMass(row, col, color) {
+  if (_isAnimating) return;
+  _isAnimating = true;
+  try { await _processMass(row, col, color); if (_active && !_checkGameOver()) await _passTurn(); } 
+  catch(e) {} finally { _isAnimating = false; _botIsMoving = false; }
+}
 
-      if (insertErr) throw insertErr;
-      _currentMatchId = newMatch.id;
+async function _processMass(row, col, color) {
+  const cell = window.CW_SESSION.board[row][col]; cell.owner = color; cell.mass++;
+  if (cell.mass >= 4) await _explode(row, col, color); else updateDOM();
+}
 
-      _pollTimer = setInterval(async () => {
-        try {
-          const { data: checkData } = await sb.from('matches')
-            .select('status, player_blue')
-            .eq('id', _currentMatchId)
-            .single();
+async function _explode(row, col, color) {
+  window.CW_SESSION.board[row][col].mass = 0; window.CW_SESSION.board[row][col].owner = null; updateDOM();
+  const n = [];
+  if (row > 0) n.push({row: row - 1, col}); if (row < 4) n.push({row: row + 1, col});
+  if (col > 0) n.push({row, col: col - 1}); if (col < 4) n.push({row, col: col + 1});
+  await new Promise(r => setTimeout(r, 200));
+  for (const pos of n) await _processMass(pos.row, pos.col, color);
+}
 
-          if (checkData && checkData.status === 'playing' && checkData.player_blue !== 'BOT') {
-            clearInterval(_pollTimer);
-            clearTimeout(_searchTimer); 
-            
-            await payEntryFee();
-
-            const { data: oppData } = await sb.from('users').select('username').eq('id', checkData.player_blue).single();
-            const rivalName = oppData?.username || "Jugador";
-
-            window.CW_SESSION = {
-              isBotMatch: false, matchId: _currentMatchId, myColor: 'pink', rivalName: rivalName,
-              board: Array(5).fill(null).map(() => Array(5).fill(null).map(() => ({ owner: null, mass: 0 })))
-            };
-
-            renderCountdownScreen($c, profile.username, rivalName, "Empiezas tú (ROSA)");
-            startCountdown($c);
-          }
-        } catch(e) { console.warn("Consultando rival..."); }
-      }, 1000);
-
-      _searchTimer = setTimeout(() => { 
-          clearInterval(_pollTimer); 
-          setupBotMatchFallback($c, profile); 
-      }, SEARCH_TIMEOUT_MS); 
-    }
-  } catch (err) { 
-      console.error(err);
-      window.location.href = '/'; 
+async function _passTurn() {
+  _currentTurn = _currentTurn === 'pink' ? 'blue' : 'pink';
+  _dbLastMoveTime = Date.now(); _turnCount++; updateDOM();
+  if (window.CW_SESSION.matchId) {
+     try { await getSupabase().from('matches').update({ board_state: window.CW_SESSION.board, current_turn: _currentTurn, last_move_time: new Date(_dbLastMoveTime).toISOString() }).eq('id', window.CW_SESSION.matchId); } catch(e) {}
   }
 }
 
-// 🚀 REPARACIÓN: HARD RESET AL CANCELAR
-function cancelSearch() {
-  const $btn = document.getElementById('btn-cancel-search');
-  if($btn) { $btn.textContent = "CANCELANDO..."; $btn.style.opacity = '0.5'; $btn.style.pointerEvents = 'none'; }
-  
-  clearTimeout(_searchTimer); 
-  clearInterval(_countdownTimer);
-  clearInterval(_pollTimer); 
-  
-  const sb = getSupabase();
-  if (_currentMatchId) { 
-      sb.from('matches').update({ status: 'cancelled' }).eq('id', _currentMatchId).catch(()=>{}); 
+function _botMove() {
+  const botColor = window.CW_SESSION.myColor === 'pink' ? 'blue' : 'pink';
+  const board = window.CW_SESSION.board;
+  let validMoves = [];
+  for(let r=0; r<5; r++) for(let c=0; c<5; c++) if (!board[r][c].owner || board[r][c].owner === botColor) validMoves.push({r,c});
+  if (validMoves.length === 0) { _botIsMoving = false; return; }
+
+  let bestMove = validMoves[0], maxScore = -9999;
+  for (let move of validMoves) {
+      let score = _evaluateBoardState(board, move.r, move.c, botColor) + (Math.random() * 0.5); 
+      if (score > maxScore) { maxScore = score; bestMove = move; }
   }
-  
-  _currentMatchId = null; 
-  window.CW_SESSION = null;
-  
-  // LA PATADA DIRECTA AL DASHBOARD
-  window.location.href = '/';
+  _addMass(bestMove.r, bestMove.c, botColor);
 }
 
-async function setupBotMatchFallback($c, profile) {
-  const sb = getSupabase();
-  try {
-    if(_currentMatchId) {
-        const {data: checkMatch} = await sb.from('matches').select('status').eq('id', _currentMatchId).single();
-        if(!checkMatch || checkMatch.status === 'cancelled') return; 
-    }
-    
-    const isUserPink = Math.random() > 0.5;
-    const randomName = VZLA_NAMES[Math.floor(Math.random() * VZLA_NAMES.length)];
-    const startTime = new Date().toISOString();
-
-    if (_currentMatchId) {
-      await sb.from('matches').update({ 
-        player_pink: isUserPink ? profile.id : 'BOT',
-        player_blue: isUserPink ? 'BOT' : profile.id,
-        status: 'playing',
-        match_start_time: startTime,
-        last_move_time: startTime
-      }).eq('id', _currentMatchId);
-    } else {
-        const { data: newMatch } = await sb.from('matches').insert([{
-            player_pink: isUserPink ? profile.id : 'BOT',
-            player_blue: isUserPink ? 'BOT' : profile.id,
-            status: 'playing',
-            match_start_time: startTime,
-            last_move_time: startTime
-        }]).select().single();
-        _currentMatchId = newMatch.id;
-    }
-
-    await payEntryFee();
-
-    window.CW_SESSION = {
-      isBotMatch: true,
-      matchId: _currentMatchId,
-      botName: randomName,
-      myColor: isUserPink ? 'pink' : 'blue',
-      botColor: isUserPink ? 'blue' : 'pink',
-      board: Array(5).fill(null).map(() => Array(5).fill(null).map(() => ({ owner: null, mass: 0 })))
-    };
-
-    const instruction = isUserPink ? "Empiezas tú (ROSA)" : "Juegas de segundo (AZUL)";
-    renderCountdownScreen($c, profile.username, randomName, instruction);
-    startCountdown($c);
-    
-  } catch (err) { 
-      console.error("Fallo Bot:", err);
-      window.location.href = '/'; 
+function _evaluateBoardState(board, r, c, color) {
+  let score = board[r][c].mass === 3 ? 50 : board[r][c].mass; 
+  const neighbors = [ {r: r-1, c}, {r: r+1, c}, {r, c: c-1}, {r, c: c+1} ];
+  for (let n of neighbors) {
+      if (n.r>=0 && n.r<5 && n.c>=0 && n.c<5) {
+          const adj = board[n.r][n.c];
+          if (adj.owner && adj.owner !== color) score += (adj.mass === 3) ? (board[r][c].mass === 3 ? 100 : -20) : adj.mass;
+      }
   }
+  return score;
 }
 
-function renderCountdownScreen($c, myName, rivalName, instruction) {
-  $c.innerHTML = `
-  <div class="mm-screen">
-    <div style="display:flex; flex-direction:column; align-items:center; gap:1.5rem;">
-      <div style="width:180px; height:180px; border-radius:50%; border:2px solid var(--border-ghost); display:flex; flex-direction:column; align-items:center; justify-content:center; position:relative; background: radial-gradient(circle, rgba(255,0,127,0.1) 0%, rgba(0,0,0,0) 70%);">
-        <span style="font-family:var(--font-mono); font-size:0.7rem; color:var(--text-dim); margin-bottom:5px;">COMIENZA EN</span>
-        <span id="mm-count" class="mm-countdown" style="font-size: 3rem;">10</span>
-      </div>
-      <div style="text-align:center;">
-        <h2 style="font-family:var(--font-display); font-size:1.1rem; color:var(--text-bright); margin-bottom:0.5rem; letter-spacing: 1px;">
-          <span style="color:var(--pink);">${escHtml(myName || 'Tú')}</span> vs <span style="color:var(--blue);">${escHtml(rivalName)}</span>
-        </h2>
-        <p style="color:var(--text-dim); font-size:0.85rem; margin-top:10px; font-weight:bold; text-transform:uppercase; letter-spacing:1px;">${instruction}</p>
-      </div>
-    </div>
-  </div>`;
+function _checkGameOver() {
+  let p = 0, b = 0;
+  window.CW_SESSION.board.forEach(row => row.forEach(c => { if(c.owner==='pink') p++; else if(c.owner==='blue') b++; }));
+  if (_turnCount >= 2) {
+     if (p === 0) { _finishGame('blue'); return true; }
+     if (b === 0) { _finishGame('pink'); return true; }
+  }
+  return false;
 }
 
-function startCountdown($c) {
-  let count = 10;
-  const $count = $c.querySelector('#mm-count');
-  _countdownTimer = setInterval(() => {
-    count--; 
-    if ($count) $count.textContent = count;
-    if (count <= 0) { 
-        clearInterval(_countdownTimer); 
-        setView('game'); 
-    }
-  }, 1000);
+async function _finishGame(winnerColor, fromDB = false, reason = null) {
+  if (!_active) return; 
+  _active = false;
+  
+  clearInterval(_masterClockTimer); clearInterval(_pollTimer); 
+  
+  const win = winnerColor === window.CW_SESSION.myColor;
+  const titleColor = win ? 'var(--pink)' : '#ff4444';
+  const titleText = win ? 'VICTORIA' : 'DERROTA';
+  
+  const overlay = document.createElement('div');
+  overlay.id = "cw-final-overlay";
+  overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(10, 10, 15, 0.95); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; backdrop-filter: blur(8px);`;
+  
+  overlay.innerHTML = `
+    <h1 style="color:${titleColor}; font-size:3.5rem; font-family:var(--font-display); text-transform:uppercase; margin-bottom:10px; text-shadow: 0 0 20px ${titleColor}; letter-spacing: 2px;">${titleText}</h1>
+    <p style="color:#aaa; font-family:var(--font-mono); font-size:1rem; margin-bottom:40px; text-transform:uppercase; letter-spacing:1px;">${reason || (win ? '+50 CP AÑADIDOS' : 'Sigue practicando en la arena')}</p>
+    <button class="btn btn-primary" id="btn-return-dash-final" style="width:250px; font-size:1.2rem; padding:15px;">VOLVER AL MENÚ</button>
+  `;
+  document.body.appendChild(overlay);
+
+  // BOTÓN DE LA PANTALLA DERROTA -> LIMPIA SESIÓN -> VA AL MENÚ DE FORMA SEGURA
+  document.getElementById('btn-return-dash-final').addEventListener('click', () => {
+     document.body.removeChild(overlay); 
+     window.CW_SESSION = null; 
+     setView('dashboard'); 
+  });
+
+  if (!fromDB && window.CW_SESSION.matchId) {
+     await getSupabase().from('matches').update({ status:'finished', winner:winnerColor }).eq('id', window.CW_SESSION.matchId).catch(()=>{});
+  }
 }
