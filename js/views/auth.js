@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/views/auth.js
- * Auth: Login · Register · Reset Password (FIJADO)
+ * Auth: Login · Register · Reset Password (TOKEN FORZADO)
  * ═══════════════════════════════════════════════════════
  */
 
@@ -15,16 +15,39 @@ export async function initAuthView($container) {
   $container.innerHTML = buildHTML();
   attachEvents($container);
 
+  const href = window.location.href;
+  const sb = getSupabase();
+
   // 🚨 EL FIX: Leemos la URL a la fuerza apenas entramos.
-  // Si en el link del correo viene la orden de recuperación, activamos el modo.
-  if (window.location.href.includes('type=recovery')) {
+  if (href.includes('type=recovery') || href.includes('access_token=') || href.includes('code=')) {
     activateRecoveryMode($container);
+
+    // 🛠️ CIRUGÍA ANTI "Auth session missing!"
+    // Arrancamos el token de la URL sin importar cómo Vercel lo deforma
+    try {
+        const accessMatch = href.match(/[?&#]access_token=([^&]+)/);
+        const refreshMatch = href.match(/[?&#]refresh_token=([^&]+)/);
+
+        if (accessMatch && refreshMatch) {
+            // Flujo antiguo (Implicit)
+            await sb.auth.setSession({
+                access_token: accessMatch[1],
+                refresh_token: refreshMatch[1]
+            });
+        } else {
+            // Flujo nuevo (PKCE)
+            const codeMatch = href.match(/[?&#]code=([^&]+)/);
+            if (codeMatch) {
+                await sb.auth.exchangeCodeForSession(codeMatch[1]);
+            }
+        }
+    } catch(e) { console.error("Error forzando sesión:", e); }
+
   } else {
     setTimeout(() => $container.querySelector('#login-email')?.focus(), 120);
   }
 
-  // Mantenemos el radar de Supabase por si acaso llega tarde
-  const sb = getSupabase();
+  // Mantenemos el radar por si acaso
   sb.auth.onAuthStateChange(async (event, session) => {
     if (event === 'PASSWORD_RECOVERY') {
       activateRecoveryMode($container);
@@ -41,16 +64,14 @@ function activateRecoveryMode($c) {
   const $subtitle = $c.querySelector('.auth-subtitle');
   const $forgotBtn = $c.querySelector('#btn-forgot');
 
-  // Apagamos lo viejo
   if ($loginForm) $loginForm.style.display = 'none';
   if ($registerForm) $registerForm.style.display = 'none';
   if ($tabs) $tabs.style.display = 'none';
   if ($forgotBtn) $forgotBtn.style.display = 'none';
 
-  // Encendemos lo nuevo
   if ($resetPassForm) $resetPassForm.style.display = '';
   if ($subtitle) {
-    $subtitle.textContent = "Crea una nueva contraseña";
+    $subtitle.textContent = "CREA UNA NUEVA CONTRASEÑA";
     $subtitle.style.color = "var(--blue)"; 
   }
 
@@ -350,7 +371,7 @@ async function handleResetPassword($c) {
   } else {
     showToast('¡Contraseña actualizada con éxito!', 'success', 3000);
     
-    // Limpiar la URL para que no vuelva a entrar en modo recuperación
+    // Limpiar la URL para que no vuelva a entrar en modo recuperación por accidente
     window.history.replaceState({}, document.title, "/#auth");
     
     setTimeout(() => {
