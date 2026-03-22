@@ -5,7 +5,7 @@
  * ═══════════════════════════════════════════════════════
  */
 
-import { registerView, showToast, escHtml, sleep } from '../core/app.js';
+import { registerView, showToast, escHtml, sleep, showModal, hideModal } from '../core/app.js';
 import { getSupabase }                             from '../core/supabase.js';
 import { setView }                                 from '../core/state.js';
 
@@ -273,3 +273,50 @@ if (!document.getElementById('_cw_shake')) {
   $s.textContent = `@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-8px)}40%{transform:translateX(8px)}60%{transform:translateX(-5px)}80%{transform:translateX(5px)}}`;
   document.head.appendChild($s);
 }
+
+// 📡 RADAR DE RECUPERACIÓN DE CONTRASEÑA
+getSupabase().auth.onAuthStateChange(async (event, session) => {
+  if (event === 'PASSWORD_RECOVERY') {
+    showModal(`
+      <div style="text-align:center; padding: 10px;">
+        <h2 style="color:var(--blue); font-family:var(--font-display); font-size:1.5rem; margin-bottom:5px;">NUEVA CLAVE</h2>
+        <p style="font-size:0.75rem; color:var(--text-dim); margin-bottom:20px; font-family:var(--font-mono);">Ingresa tu nueva contraseña para Color Wars.</p>
+        
+        <div class="field-group" style="text-align:left;">
+          <input type="password" id="new-pwd-input" class="input-field" placeholder="Mínimo 6 caracteres" style="border-color:var(--blue);" />
+        </div>
+        
+        <div id="new-pwd-err" class="field-error" style="margin-bottom:15px;"></div>
+        
+        <button id="btn-save-new-pwd" class="btn btn-primary" style="width:100%; background: linear-gradient(90deg, #00f0ff, #0055ff); border:none;">
+          GUARDAR Y ENTRAR
+        </button>
+      </div>
+    `, { closable: false });
+
+    document.getElementById('btn-save-new-pwd').addEventListener('click', async () => {
+      const newPass = document.getElementById('new-pwd-input').value;
+      const $err = document.getElementById('new-pwd-err');
+      const $btn = document.getElementById('btn-save-new-pwd');
+      
+      $err.textContent = '';
+      if (!newPass || newPass.length < 6) { 
+          $err.textContent = 'La contraseña debe tener al menos 6 caracteres.'; 
+          return; 
+      }
+
+      $btn.disabled = true; $btn.textContent = 'GUARDANDO...';
+
+      const { error } = await getSupabase().auth.updateUser({ password: newPass });
+
+      if (error) {
+        $err.textContent = 'Error: ' + error.message;
+        $btn.disabled = false; $btn.textContent = 'GUARDAR Y ENTRAR';
+      } else {
+        showToast('¡Contraseña actualizada con éxito!', 'success');
+        hideModal();
+        setView('dashboard');
+      }
+    });
+  }
+});
