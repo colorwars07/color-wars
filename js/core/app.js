@@ -1,7 +1,7 @@
 /**
  * ═══════════════════════════════════════════════════════
  * COLOR WARS — js/core/app.js
- * SPA Router + UI Core (Efecto Brillo LENTO y ELEGANTE)
+ * SPA Router + UI Core + Sincronización de Tema Claro/Oscuro
  * ═══════════════════════════════════════════════════════
  */
 
@@ -13,7 +13,7 @@ import {
   getWalletBs, getWalletUSD,
 } from './state.js';
 
-// ── INYECCIÓN DEL EFECTO BRILLO PARA EL LOGO (LENTO Y PREMIUM) ──
+// ── INYECCIÓN DEL EFECTO BRILLO PARA EL LOGO ──
 const style = document.createElement('style');
 style.innerHTML = `
   #header-title {
@@ -31,13 +31,12 @@ style.innerHTML = `
     height: 100%;
     background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.8), transparent);
     transform: skewX(-25deg);
-    /* 6 segundos en total para que no maree */
     animation: logo-shine 6s ease-in-out infinite; 
   }
   @keyframes logo-shine {
     0% { left: -150%; }
-    40% { left: 150%; } /* Se toma su tiempo cruzando las letras suavemente */
-    100% { left: 150%; } /* Descansa un rato antes de volver a brillar */
+    40% { left: 150%; } 
+    100% { left: 150%; } 
   }
 `;
 document.head.appendChild(style);
@@ -55,6 +54,11 @@ const $toastContainer = document.getElementById('toast-container');
 const $fab            = document.getElementById('fab-whatsapp');
 const $footerTrigger  = document.getElementById('footer-trigger');
 
+// 🌓 REFS DEL BOTÓN DE TEMA
+const $btnThemeToggle = document.getElementById('btn-theme-toggle');
+const $iconSun        = document.getElementById('icon-sun');
+const $iconMoon       = document.getElementById('icon-moon');
+
 const $views = {
   auth:        document.getElementById('view-auth'),
   dashboard:   document.getElementById('view-dashboard'),
@@ -62,6 +66,41 @@ const $views = {
   game:        document.getElementById('view-game'),
   admin:       document.getElementById('view-admin'),
 };
+
+// ── LÓGICA DEL TEMA CLARO/OSCURO ──────────────────────
+function applyTheme(theme) {
+  const isLight = theme === 'light';
+  if (isLight) {
+    document.documentElement.classList.remove('dark');
+    document.documentElement.classList.add('light');
+    if ($iconSun) $iconSun.classList.add('hidden');
+    if ($iconMoon) $iconMoon.classList.remove('hidden');
+  } else {
+    document.documentElement.classList.remove('light');
+    document.documentElement.classList.add('dark');
+    if ($iconSun) $iconSun.classList.remove('hidden');
+    if ($iconMoon) $iconMoon.classList.add('hidden');
+  }
+}
+
+async function toggleTheme() {
+  const isLight = document.documentElement.classList.contains('light');
+  const newTheme = isLight ? 'dark' : 'light';
+  
+  // Cambia instantáneamente en la pantalla
+  applyTheme(newTheme);
+  localStorage.setItem('cw_theme', newTheme);
+
+  // Manda a guardar a Supabase de fondo si el usuario está logueado
+  const session = getSession();
+  if (session?.user) {
+    try {
+      await getSupabase().from('users').update({ theme: newTheme }).eq('id', session.user.id);
+      const profile = getProfile();
+      if (profile) profile.theme = newTheme;
+    } catch(e) { console.error("Error guardando tema en BD", e); }
+  }
+}
 
 // ── View init registry ────────────────────────────────
 const _viewInits = {};
@@ -88,6 +127,11 @@ async function runLoader() {
 
 // ── BOOT ──────────────────────────────────────────────
 export async function boot() {
+  // Inicializamos el tema desde la memoria apenas arranca el motor
+  const savedTheme = localStorage.getItem('cw_theme') || 'dark';
+  applyTheme(savedTheme);
+  if ($btnThemeToggle) $btnThemeToggle.addEventListener('click', toggleTheme);
+
   await runLoader();
 
   // Hide loader
@@ -119,6 +163,14 @@ export async function boot() {
         setView('auth');
         return;
       }
+
+      // 🌓 SINCRONIZACIÓN MAESTRA DE TEMA:
+      // Si el perfil en Supabase tiene un tema guardado distinto al del celular, la nube manda.
+      if (profile.theme && profile.theme !== (localStorage.getItem('cw_theme') || 'dark')) {
+        applyTheme(profile.theme);
+        localStorage.setItem('cw_theme', profile.theme);
+      }
+
       if (profile.role === 'admin') {
         setView('admin');
       } else {
@@ -187,7 +239,6 @@ function updateHeader(viewKey) {
 
   const profile = getProfile();
 
-  // 🔥 OCULTAMOS LA BILLETERA VIEJA DEL HEADER
   $headerWallet.classList.add('hidden');
   $headerWallet.innerHTML = '';
 
@@ -220,7 +271,7 @@ window.__CW_logout = async () => {
 export function showModal(html, { closable = true } = {}) {
   $modalContent.innerHTML = html;
   $modalOverlay.classList.remove('hidden');
-  $modalOverlay.offsetHeight; // reflow
+  $modalOverlay.offsetHeight; 
   $modalOverlay.classList.add('visible');
 
   if (closable) {
