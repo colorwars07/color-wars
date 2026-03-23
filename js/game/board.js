@@ -1,11 +1,13 @@
 import { registerView, showToast, escHtml } from '../core/app.js';
 import { setView } from '../core/state.js';
 import { getSupabase } from '../core/supabase.js';
+import { Client } from 'https://esm.sh/colyseus.js@0.15.0';
 
-const BOARD_SIZE = 5; let _active = false; let _currentTurn = 'pink'; let _isAnimating = false; let _turnCount = 0; let _missedTurns = 0; let _$container = null; let _masterClockTimer = null; let _matchChannel = null; let _dbStartTime = null; let _dbLastMoveTime = null; let _lastDBUpdateTime = null; let _botIsMoving = false;
-let _lockPollingUntil = 0; let _opponentMissedTurns = 0; let _processingStrike = false;
+const BOARD_SIZE = 5; let _active = false; let _currentTurn = 'pink'; let _isAnimating = false; let _turnCount = 0; let _missedTurns = 0; let _$container = null; let _masterClockTimer = null; let _dbStartTime = null; let _dbLastMoveTime = null; let _botIsMoving = false;
+let _opponentMissedTurns = 0; let _processingStrike = false;
 
-let _actionQueue = []; let _isProcessingQueue = false;
+let _room = null; 
+let _colyseusClient = new Client('wss://color-wars-server-2r51.onrender.com');
 
 const sfx = {
   click: new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'], volume: 0.5 }), 
@@ -20,9 +22,9 @@ registerView('game', initGameView);
 export async function initGameView($container) {
   _$container = $container;
   if (!window.CW_SESSION || !window.CW_SESSION.board) { window.CW_SESSION = null; setView('dashboard'); return; }
-  _active = true; _isAnimating = false; _turnCount = 0; _missedTurns = 0; _botIsMoving = false; _lastDBUpdateTime = Date.now();
-  _lockPollingUntil = 0; _opponentMissedTurns = 0; _processingStrike = false;
-  _actionQueue = []; _isProcessingQueue = false; 
+  _active = true; _isAnimating = false; _turnCount = 0; _missedTurns = 0; _botIsMoving = false;
+  _opponentMissedTurns = 0; _processingStrike = false;
+  
   const sb = getSupabase();
 
   if (window.CW_SESSION.matchId) {
@@ -30,45 +32,60 @@ export async function initGameView($container) {
       const { data: matchData } = await sb.from('matches').select('*').eq('id', window.CW_SESSION.matchId).single();
       if (matchData) {
         if (matchData.status === 'finished' || matchData.status === 'cancelled') { window.CW_SESSION = null; setView('dashboard'); return; }
-        window.CW_SESSION.board = matchData.board_state || window.CW_SESSION.board; _currentTurn = matchData.current_turn || 'pink'; _dbStartTime = matchData.match_start_time ? new Date(matchData.match_start_time).getTime() : Date.now(); _dbLastMoveTime = Date.now();
+        _dbStartTime = matchData.match_start_time ? new Date(matchData.match_start_time).getTime() : Date.now(); _dbLastMoveTime = Date.now();
       }
     } catch(e) {}
     
-    if (!window.CW_SESSION.isBotMatch) _startRealtimeSubscription();
+    if (!window.CW_SESSION.isBotMatch) {
+        await _connectToColyseus();
+    }
   }
   renderHTML(); updateDOM(); _startMasterClock();
 }
 
-function _startRealtimeSubscription() {
-  const sb = getSupabase();
-  if (_matchChannel) { sb.removeChannel(_matchChannel); _matchChannel = null; }
-  
-  _matchChannel = sb.channel(`match_${window.CW_SESSION.matchId}`)
-    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${window.CW_SESSION.matchId}` }, (payload) => {
-      if (!_active) return; 
-      _actionQueue.push(payload.new);
-      _processQueue();
-    }).subscribe();
-}
+async function _connectToColyseus() {
+    try {
+        _room = await _colyseusClient.joinOrCreate("arena");
 
-async function _processQueue() {
-  if (_isProcessingQueue || _actionQueue.length === 0 || !_active) return;
-  _isProcessingQueue = true;
+        _room.onMessage("error", (mensaje) => {
+            showToast(mensaje, "warning");
+            _isAnimating = false;
+        });
 
-  while (_actionQueue.length > 0) {
-      if (_isAnimating) { await new Promise(r => setTimeout(r, 200)); continue; } 
+        _room.onMessage("game_over", (data) => {
+            _finishGame(data.winner, false, data.reason);
+        });
 
-      const data = _actionQueue.shift();
-      _lastDBUpdateTime = Date.now(); 
-      if (data.status === 'finished' && data.winner) { _finishGame(data.winner, true); break; }
-      
-      if (Date.now() > _lockPollingUntil) {
-          if (data.current_turn === window.CW_SESSION.myColor && _currentTurn !== window.CW_SESSION.myColor) {
-             window.CW_SESSION.board = data.board_state; _currentTurn = data.current_turn; _dbLastMoveTime = new Date(data.last_move_time).getTime(); _missedTurns = 0; _opponentMissedTurns = 0; updateDOM();
-          }
-      }
-  }
-  _isProcessingQueue = false;
+        _room.onStateChange((state) => {
+            if (!_active) return;
+            
+            let huboExplosion = false;
+            for(let r=0; r<5; r++) {
+                for(let c=0; c<5; c++) {
+                    const serverCell = state.board[r].cells[c];
+                    const localCell = window.CW_SESSION.board[r][c];
+                    if (localCell.owner !== serverCell.owner || localCell.mass !== serverCell.mass) {
+                        localCell.owner = serverCell.owner;
+                        localCell.mass = serverCell.mass;
+                        huboExplosion = true;
+                    }
+                }
+            }
+            
+            if (huboExplosion) {
+                sfx.pop.play();
+                _currentTurn = state.currentTurn;
+                _dbLastMoveTime = Date.now();
+                _missedTurns = 0;
+                _opponentMissedTurns = 0;
+                updateDOM();
+                _isAnimating = false;
+            }
+        });
+
+    } catch (e) {
+        showToast("Error conectando a la arena", "error");
+    }
 }
 
 function renderHTML() {
@@ -109,14 +126,6 @@ function updateDOM() {
   if (myColor === 'pink') { if(sy) sy.textContent = pS; if(sr) sr.textContent = bS; } else { if(sy) sy.textContent = bS; if(sr) sr.textContent = pS; }
 }
 
-function _resolveTimeOutWinner() {
-    let pCells = 0, bCells = 0, pMass = 0, bMass = 0;
-    window.CW_SESSION.board.forEach(row => row.forEach(c => { if(c.owner === 'pink') { pCells++; pMass += c.mass; } else if(c.owner === 'blue') { bCells++; bMass += c.mass; } }));
-    if (pCells > bCells) return 'pink'; if (bCells > pCells) return 'blue';
-    if (pMass > bMass) return 'pink'; if (bMass > pMass) return 'blue';
-    return _currentTurn === 'pink' ? 'blue' : 'pink'; 
-}
-
 function _startMasterClock() {
     clearInterval(_masterClockTimer);
     _masterClockTimer = setInterval(() => {
@@ -128,28 +137,14 @@ function _startMasterClock() {
         const gt = _$container.querySelector('#global-timer');
         if (gt) gt.textContent = `${Math.floor(globalLeft / 60).toString().padStart(2, '0')}:${(globalLeft % 60).toString().padStart(2, '0')}`;
         
-        if (globalLeft <= 0) { _finishGame(_resolveTimeOutWinner(), false, "TIEMPO AGOTADO (VICTORIA POR PUNTOS)"); return; }
-
         let turnLeft = 10 - Math.floor((now - _dbLastMoveTime) / 1000);
         const turnEl = _$container.querySelector('#turn-indicator'); const isMyTurn = _currentTurn === window.CW_SESSION.myColor;
         
         if (isMyTurn) {
             if (turnEl) turnEl.innerHTML = `<span style="color:var(--pink);">TU TURNO: ${Math.max(0, turnLeft)}s</span>`;
-            
-            if (turnLeft <= 0 && !_isAnimating && !_processingStrike) {
-                _processingStrike = true; _missedTurns++; _dbLastMoveTime = now;
-                if (_missedTurns >= 3) { _finishGame(window.CW_SESSION.myColor==='pink'?'blue':'pink', false, "ELIMINADO POR INACTIVIDAD (3/3)"); } 
-                else { showToast(`¡TURNO SALTADO! Advertencia ${_missedTurns}/3`, 'warning'); _passTurn(); }
-                setTimeout(() => { _processingStrike = false; }, 1200);
-            }
         } else {
             if (turnEl) turnEl.innerHTML = `<span style="color:#aaa;">ESPERANDO RIVAL: ${Math.max(0, turnLeft)}s</span>`;
-            
-            if (!window.CW_SESSION.isBotMatch && turnLeft <= -2 && !_isAnimating) {
-                _opponentMissedTurns++; _dbLastMoveTime = now;
-                if (_opponentMissedTurns >= 3) { _finishGame(window.CW_SESSION.myColor, false, "RIVAL ELIMINADO POR INACTIVIDAD (3/3)"); } 
-                else { showToast(`El rival perdió su turno. Strike ${_opponentMissedTurns}/3`, 'info'); _passTurn(); }
-            } else if (window.CW_SESSION.isBotMatch && turnLeft <= 8 && !_isAnimating && !_botIsMoving) { 
+            if (window.CW_SESSION.isBotMatch && turnLeft <= 8 && !_isAnimating && !_botIsMoving) { 
                 _botIsMoving = true; setTimeout(() => { _botMove(); }, 800); 
             }
         }
@@ -159,114 +154,65 @@ function _startMasterClock() {
 function handlePlayerClick(row, col) {
   if (!_active || _isAnimating || _currentTurn !== window.CW_SESSION.myColor) return;
   const cell = window.CW_SESSION.board[row][col]; const myColor = window.CW_SESSION.myColor;
+  
   let myPieces = 0; window.CW_SESSION.board.forEach(r => r.forEach(c => { if (c.owner === myColor) myPieces++; }));
-  if (myPieces > 0 && cell.owner !== myColor) { showToast("Solo puedes presionar tus fichas", "warning"); return; }
-  if (cell.owner && cell.owner !== myColor) return;
-
+  if (myPieces > 0 && cell.owner !== myColor && cell.owner !== "") { showToast("Solo puedes presionar tus fichas", "warning"); return; }
+  
   sfx.click.play();
   if (navigator.vibrate) navigator.vibrate(15);
   const domCell = _$container.querySelector(`[data-r="${row}"][data-c="${col}"]`);
   if (domCell && window.gsap) gsap.from(domCell, { scale: 0.8, duration: 0.12, ease: "back.out(2)" });
 
-  _missedTurns = 0; _addMass(row, col, myColor); 
+  _addMass(row, col, myColor); 
 }
 
-// 🛡️ CIRUGÍA FASE 4: Autoridad del Servidor
 async function _addMass(row, col, color) {
-  if (_isAnimating) return; _isAnimating = true;
-  try { 
-    if (window.CW_SESSION.isBotMatch) {
-        // En partida de Bot, calculamos todo local sin riesgo (No hay CP involucrados)
-        await _processMass(row, col, color); 
-        if (_active && !_checkGameOver()) _passTurn(); 
-    } else {
-        // MULTIJUGADOR: El cliente es ciego, delega todo a la Edge Function de Supabase
-        const sb = getSupabase();
-        await sb.functions.invoke('play_move', { 
-            body: { match_id: window.CW_SESSION.matchId, row: row, col: col } 
-        });
-        // WebSockets bajará la respuesta del servidor a la Action Queue
-    }
-  } catch(e) {} finally { _isAnimating = false; _botIsMoving = false; _processQueue(); }
+  if (_isAnimating) return; _isAnimating = true; 
+  
+  if (window.CW_SESSION.isBotMatch) {
+      try { await _processMassLocal(row, col, color); if (_active && !_checkGameOverLocal()) _passTurnLocal(); } 
+      catch(e) {} finally { _isAnimating = false; _botIsMoving = false; }
+  } else {
+      if (_room) {
+          _room.send("move", { row: row, col: col });
+      }
+  }
 }
 
-async function _processMass(row, col, color) {
+async function _processMassLocal(row, col, color) {
   const cell = window.CW_SESSION.board[row][col]; cell.owner = color; cell.mass++;
-  
   const domCell = _$container.querySelector(`[data-r="${row}"][data-c="${col}"]`);
   if (domCell && window.gsap) gsap.to(domCell.querySelector('.cell-mass'), { scale: 1.25, duration: 0.08, yoyo: true, repeat: 1 });
-
-  if (cell.mass >= 4) {
-    sfx.boom.play();
-    if (navigator.vibrate) navigator.vibrate([40, 30, 40]);
-    if (window.gsap) gsap.to(".board-wrap", { x: 5, y: 5, duration: 0.05, repeat: 5, yoyo: true });
-    
-    await _explode(row, col, color); 
-  } else {
-    sfx.pop.play();
-    updateDOM();
-  }
+  if (cell.mass >= 4) { sfx.boom.play(); if (navigator.vibrate) navigator.vibrate([40, 30, 40]); if (window.gsap) gsap.to(".board-wrap", { x: 5, y: 5, duration: 0.05, repeat: 5, yoyo: true }); await _explodeLocal(row, col, color); } else { sfx.pop.play(); updateDOM(); }
 }
 
-async function _explode(row, col, color) {
+async function _explodeLocal(row, col, color) {
   window.CW_SESSION.board[row][col].mass = 0; window.CW_SESSION.board[row][col].owner = null; updateDOM();
-  const n = [];
-  if (row > 0) n.push({row: row - 1, col}); if (row < 4) n.push({row: row + 1, col});
-  if (col > 0) n.push({row, col: col - 1}); if (col < 4) n.push({row, col: col + 1});
-  await new Promise(r => setTimeout(r, 200));
-  for (const pos of n) await _processMass(pos.row, pos.col, color);
+  const n = []; if (row > 0) n.push({row: row - 1, col}); if (row < 4) n.push({row: row + 1, col}); if (col > 0) n.push({row, col: col - 1}); if (col < 4) n.push({row, col: col + 1});
+  await new Promise(r => setTimeout(r, 200)); for (const pos of n) await _processMassLocal(pos.row, pos.col, color);
 }
 
-function _passTurn() {
-  _currentTurn = _currentTurn === 'pink' ? 'blue' : 'pink'; _dbLastMoveTime = Date.now(); _turnCount++; updateDOM();
-  _lockPollingUntil = Date.now() + 1500; 
-  
-  if (window.CW_SESSION.matchId) { getSupabase().from('matches').update({ board_state: window.CW_SESSION.board, current_turn: _currentTurn, last_move_time: new Date(_dbLastMoveTime).toISOString() }).eq('id', window.CW_SESSION.matchId).then(); }
-}
+function _passTurnLocal() { _currentTurn = _currentTurn === 'pink' ? 'blue' : 'pink'; _dbLastMoveTime = Date.now(); _turnCount++; updateDOM(); }
+
+function _checkGameOverLocal() { let p = 0, b = 0; window.CW_SESSION.board.forEach(row => row.forEach(c => { if(c.owner==='pink') p++; else if(c.owner==='blue') b++; })); if (_turnCount >= 2) { if (p === 0) { _finishGame('blue'); return true; } if (b === 0) { _finishGame('pink'); return true; } } return false; }
 
 function _botMove() {
-  const botColor = window.CW_SESSION.myColor === 'pink' ? 'blue' : 'pink'; const playerColor = window.CW_SESSION.myColor; const board = window.CW_SESSION.board;
-  let botPieces = 0; board.forEach(r => r.forEach(c => { if(c.owner === botColor) botPieces++; }));
-
-  let validMoves = [];
-  for(let r=0; r<5; r++) { for(let c=0; c<5; c++) { if (botPieces > 0) { if (board[r][c].owner === botColor) validMoves.push({r,c}); } else { if (!board[r][c].owner) validMoves.push({r,c}); } } }
-
-  if (validMoves.length === 0) { _botIsMoving = false; _passTurn(); return; }
-
-  let bestMove = validMoves[0]; let maxScore = -Infinity;
-  for (let move of validMoves) {
-      let simBoard = JSON.parse(JSON.stringify(board)); _simulateAddMass(simBoard, move.r, move.c, botColor); let score = _evaluateSimulatedBoard(simBoard, botColor, playerColor); score += Math.random() * 0.5; 
-      if (score > maxScore) { maxScore = score; bestMove = move; }
-  }
-  _addMass(bestMove.r, bestMove.c, botColor);
-}
-
-function _simulateAddMass(board, r, c, color) { board[r][c].owner = color; board[r][c].mass++; if (board[r][c].mass >= 4) { _simulateExplode(board, r, c, color); } }
-function _simulateExplode(board, r, c, color) { board[r][c].mass = 0; board[r][c].owner = null; const n = []; if (r > 0) n.push({r: r - 1, c}); if (r < 4) n.push({r: r + 1, c}); if (c > 0) n.push({r, c: c - 1}); if (c < 4) n.push({r, c: c + 1}); for (const pos of n) { _simulateAddMass(board, pos.r, pos.c, color); } }
-
-function _evaluateSimulatedBoard(board, botColor, playerColor) {
-    let score = 0;
-    for(let r=0; r<5; r++) { for(let c=0; c<5; c++) { const cell = board[r][c]; if (cell.owner === botColor) { score += 10 + (cell.mass * 5); if (cell.mass === 3) score += 30; } else if (cell.owner === playerColor) { score -= 10 + (cell.mass * 5); if (cell.mass === 3) score -= 50; } } }
-    return score;
-}
-
-function _checkGameOver() {
-  let p = 0, b = 0; window.CW_SESSION.board.forEach(row => row.forEach(c => { if(c.owner==='pink') p++; else if(c.owner==='blue') b++; }));
-  if (_turnCount >= 2) { if (p === 0) { _finishGame('blue'); return true; } if (b === 0) { _finishGame('pink'); return true; } }
-  return false;
+  const botColor = window.CW_SESSION.myColor === 'pink' ? 'blue' : 'pink'; const board = window.CW_SESSION.board; let botPieces = 0; board.forEach(r => r.forEach(c => { if(c.owner === botColor) botPieces++; }));
+  let validMoves = []; for(let r=0; r<5; r++) { for(let c=0; c<5; c++) { if (botPieces > 0) { if (board[r][c].owner === botColor) validMoves.push({r,c}); } else { if (!board[r][c].owner) validMoves.push({r,c}); } } }
+  if (validMoves.length === 0) { _botIsMoving = false; _passTurnLocal(); return; }
+  let bestMove = validMoves[0]; _addMass(bestMove.r, bestMove.c, botColor);
 }
 
 function _finishGame(winnerColor, fromDB = false, reason = null) {
   if (!_active) return; _active = false; clearInterval(_masterClockTimer); 
-  if (_matchChannel) { getSupabase().removeChannel(_matchChannel); _matchChannel = null; }
+  
+  if (_room) { _room.leave(); _room = null; } 
   
   const win = winnerColor === window.CW_SESSION.myColor;
-  
-  if (win) { sfx.win.play(); if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 400]); 
-  } else { sfx.lose.play(); if (navigator.vibrate) navigator.vibrate([300, 200, 300]); }
+  if (win) { sfx.win.play(); if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 400]); } else { sfx.lose.play(); if (navigator.vibrate) navigator.vibrate([300, 200, 300]); }
 
-  const myRealColor = window.CW_SESSION.myColor === 'pink' ? 'var(--pink)' : '#a855f7';
-  const titleColor = win ? myRealColor : '#ff4444'; const titleText = win ? 'VICTORIA' : 'DERROTA';
+  const titleColor = win ? (window.CW_SESSION.myColor === 'pink' ? 'var(--pink)' : '#a855f7') : '#ff4444'; 
+  const titleText = win ? 'VICTORIA' : 'DERROTA';
   
   const overlay = document.createElement('div'); overlay.id = "cw-final-overlay";
   overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(10, 10, 15, 0.95); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; backdrop-filter: blur(12px); opacity: 0;`;
@@ -282,7 +228,10 @@ function _finishGame(winnerColor, fromDB = false, reason = null) {
   document.getElementById('btn-return-dash-final').addEventListener('click', () => {
      const btn = document.getElementById('btn-return-dash-final'); btn.textContent = "SALIENDO..."; btn.disabled = true;
      window.sessionStorage.setItem('cw_skip_recon', '1');
-     if (window.CW_SESSION && window.CW_SESSION.matchId) { getSupabase().from('matches').update({ status:'finished' }).eq('id', window.CW_SESSION.matchId).then(); }
+     
+     if (window.CW_SESSION && window.CW_SESSION.matchId) { 
+         getSupabase().from('matches').update({ status:'finished' }).eq('id', window.CW_SESSION.matchId).then(); 
+     }
      window.CW_SESSION = null; document.body.removeChild(overlay); setView('dashboard'); 
   });
 
