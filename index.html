@@ -25,7 +25,27 @@
     window.tailwind = window.tailwind || {};
     window.__TW_CONFIG__ = {
       darkMode: 'class',
-      theme: { extend: { colors: { 'void': '#0a0a0f', 'surface-1': '#1a1a2e', 'surface-2': '#16213e', 'neon-purple': '#7000FF', 'neon-blue': '#00E5FF', 'neon-pink': '#FF007F', 'text-ghost': '#3a3a5c', 'text-dim': '#6b6b9a', 'text-base': '#c8c8e8', 'text-bright': '#eeeeff' }, fontFamily: { display: ['Orbitron', 'monospace'], mono: ['Share Tech Mono', 'monospace'], body: ['Rajdhani', 'sans-serif'] } } },
+      theme: {
+        extend: {
+          colors: {
+            'void':        '#0a0a0f',
+            'surface-1':   '#1a1a2e',
+            'surface-2':   '#16213e',
+            'neon-purple': '#7000FF',
+            'neon-blue':   '#00E5FF',
+            'neon-pink':   '#FF007F',
+            'text-ghost':  '#3a3a5c',
+            'text-dim':    '#6b6b9a',
+            'text-base':   '#c8c8e8',
+            'text-bright': '#eeeeff',
+          },
+          fontFamily: {
+            display: ['Orbitron', 'monospace'],
+            mono:    ['Share Tech Mono', 'monospace'],
+            body:    ['Rajdhani', 'sans-serif'],
+          },
+        },
+      },
     };
     if (window.tailwind && window.tailwind.config) tailwind.config = window.__TW_CONFIG__;
   </script>
