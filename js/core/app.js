@@ -13,34 +13,6 @@ import {
   getWalletBs, getWalletUSD,
 } from './state.js';
 
-// ── INYECCIÓN DEL EFECTO BRILLO PARA EL LOGO ──
-const style = document.createElement('style');
-style.innerHTML = `
-  #header-title {
-    position: relative;
-    display: inline-block;
-    overflow: hidden;
-    text-shadow: 0 0 10px rgba(255, 0, 127, 0.4);
-  }
-  #header-title::after {
-    content: '';
-    position: absolute;
-    top: 0;
-    left: -150%;
-    width: 60%;
-    height: 100%;
-    background: linear-gradient(to right, transparent, rgba(255, 255, 255, 0.8), transparent);
-    transform: skewX(-25deg);
-    animation: logo-shine 6s ease-in-out infinite; 
-  }
-  @keyframes logo-shine {
-    0% { left: -150%; }
-    40% { left: 150%; } 
-    100% { left: 150%; } 
-  }
-`;
-document.head.appendChild(style);
-
 // ── DOM refs ───────────────────────────────────────────
 const $loadingScreen  = document.getElementById('loading-screen');
 const $loadingBar     = document.getElementById('loading-bar');
