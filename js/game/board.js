@@ -3,15 +3,15 @@ import { setView } from '../core/state.js';
 import { getSupabase } from '../core/supabase.js';
 
 const BOARD_SIZE = 5; let _active = false; let _currentTurn = 'pink'; let _isAnimating = false; let _turnCount = 0; let _missedTurns = 0; let _$container = null; let _masterClockTimer = null; let _pollTimer = null; let _dbStartTime = null; let _dbLastMoveTime = null; let _lastDBUpdateTime = null; let _botIsMoving = false;
-let _lockPollingUntil = 0; let _opponentMissedTurns = 0;
+let _lockPollingUntil = 0; let _opponentMissedTurns = 0; let _processingStrike = false;
 
-// 🔊 CONFIGURACIÓN DE SONIDOS (Limpios, sin mierdas galácticas)
+// 🔊 CONFIGURACIÓN DE SONIDOS 
 const sfx = {
-  click: new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'], volume: 0.5 }), // El click original suave
-  pop:   new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'], volume: 0.7 }), // El pop original
-  boom:  new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'], volume: 1.0 }), // Usamos el pop fuerte para explotar, cero láseres
-  win:   new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/544/544-preview.mp3'], volume: 0.9 }),  // TUS Aplausos
-  lose:  new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/3012/3012-preview.mp3'], volume: 0.8 }) // TU trompeta de derrota
+  click: new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'], volume: 0.5 }), 
+  pop:   new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'], volume: 0.7 }), 
+  boom:  new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'], volume: 1.0 }), 
+  win:   new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/544/544-preview.mp3'], volume: 0.9 }),  
+  lose:  new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/3012/3012-preview.mp3'], volume: 0.8 }) 
 };
 
 registerView('game', initGameView);
@@ -20,7 +20,7 @@ export async function initGameView($container) {
   _$container = $container;
   if (!window.CW_SESSION || !window.CW_SESSION.board) { window.CW_SESSION = null; setView('dashboard'); return; }
   _active = true; _isAnimating = false; _turnCount = 0; _missedTurns = 0; _botIsMoving = false; _lastDBUpdateTime = Date.now();
-  _lockPollingUntil = 0; _opponentMissedTurns = 0;
+  _lockPollingUntil = 0; _opponentMissedTurns = 0; _processingStrike = false;
   const sb = getSupabase();
 
   if (window.CW_SESSION.matchId) {
@@ -39,7 +39,7 @@ export async function initGameView($container) {
 function _startPolling() {
   clearInterval(_pollTimer);
   _pollTimer = setInterval(async () => {
-    if (!_active || _isAnimating) return;
+    if (!_active || _isAnimating) return; // 🔥 Evita la lectura si hay explosión activa
     try {
       const { data } = await getSupabase().from('matches').select('board_state, current_turn, last_move_time, status, winner').eq('id', window.CW_SESSION.matchId).single();
       if (data) {
@@ -61,17 +61,6 @@ function renderHTML() {
   const rivalColorVar = myColor === 'pink' ? '#a855f7' : 'var(--pink)';
   
   _$container.innerHTML = `
-  <style>
-    .cell-blue .mass-orb { background-color: #a855f7 !important; box-shadow: 0 0 8px #a855f7 !important; }
-    html.light .game-arena > div:first-child { background: #ffffff !important; border: 1px solid #e0e0ea !important; box-shadow: 0 8px 25px rgba(0,0,0,0.05) !important; }
-    html.light .game-arena span { color: #11111a !important; text-shadow: none !important; }
-    html.light #global-timer { color: #ffaa00 !important; }
-    html.light #score-you, html.light #score-rival { color: #11111a !important; }
-    html.light .board-wrap, html.light #grid { background: #f4f4f7 !important; border: 1px solid #c0c0c8 !important; box-shadow: 0 4px 15px rgba(0,0,0,0.05) !important; }
-    html.light .cell { background: #ffffff !important; border: 1px solid #e0e0ea !important; }
-    html.light #btn-surrender { border-color: #11111a !important; color: #11111a !important; }
-    .cell-mass { transition: transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-  </style>
   <div class="game-arena">
     <div style="background: rgba(10, 10, 15, 0.9); border: 1px solid var(--border-ghost); border-radius: 14px; padding: 12px; margin-bottom: 20px; width: 95%; max-width: 380px; display: flex; flex-direction: column; gap: 8px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
@@ -88,11 +77,7 @@ function renderHTML() {
   </div>`;
 
   _$container.querySelector('#grid').addEventListener('click', (e) => { const cell = e.target.closest('.cell'); if (cell) handlePlayerClick(parseInt(cell.dataset.r), parseInt(cell.dataset.c)); });
-  
-  _$container.querySelector('#btn-surrender').addEventListener('click', () => {
-     if (!confirm("¿Seguro que quieres abandonar?")) return;
-     _finishGame(window.CW_SESSION.myColor === 'pink' ? 'blue' : 'pink', false, "ABANDONASTE LA ARENA");
-  });
+  _$container.querySelector('#btn-surrender').addEventListener('click', () => { if (!confirm("¿Seguro que quieres abandonar?")) return; _finishGame(window.CW_SESSION.myColor === 'pink' ? 'blue' : 'pink', false, "ABANDONASTE LA ARENA"); });
 }
 
 function updateDOM() {
@@ -134,22 +119,21 @@ function _startMasterClock() {
         
         if (isMyTurn) {
             if (turnEl) turnEl.innerHTML = `<span style="color:var(--pink);">TU TURNO: ${Math.max(0, turnLeft)}s</span>`;
-            if (turnLeft <= 0 && !_isAnimating) {
-                _missedTurns++; _dbLastMoveTime = now;
-                if (_missedTurns >= 3) _finishGame(window.CW_SESSION.myColor==='pink'?'blue':'pink', false, "ELIMINADO POR INACTIVIDAD (3/3)");
+            
+            // 🔥 CIRUGÍA: Blindaje contra lag para que no de strikes injustos seguidos
+            if (turnLeft <= 0 && !_isAnimating && !_processingStrike) {
+                _processingStrike = true; _missedTurns++; _dbLastMoveTime = now;
+                if (_missedTurns >= 3) { _finishGame(window.CW_SESSION.myColor==='pink'?'blue':'pink', false, "ELIMINADO POR INACTIVIDAD (3/3)"); } 
                 else { showToast(`¡TURNO SALTADO! Advertencia ${_missedTurns}/3`, 'warning'); _passTurn(); }
+                setTimeout(() => { _processingStrike = false; }, 1200);
             }
         } else {
             if (turnEl) turnEl.innerHTML = `<span style="color:#aaa;">ESPERANDO RIVAL: ${Math.max(0, turnLeft)}s</span>`;
             
             if (!window.CW_SESSION.isBotMatch && turnLeft <= -2 && !_isAnimating) {
                 _opponentMissedTurns++; _dbLastMoveTime = now;
-                if (_opponentMissedTurns >= 3) {
-                    _finishGame(window.CW_SESSION.myColor, false, "RIVAL ELIMINADO POR INACTIVIDAD (3/3)");
-                } else {
-                    showToast(`El rival perdió su turno. Strike ${_opponentMissedTurns}/3`, 'info');
-                    _passTurn();
-                }
+                if (_opponentMissedTurns >= 3) { _finishGame(window.CW_SESSION.myColor, false, "RIVAL ELIMINADO POR INACTIVIDAD (3/3)"); } 
+                else { showToast(`El rival perdió su turno. Strike ${_opponentMissedTurns}/3`, 'info'); _passTurn(); }
             } else if (window.CW_SESSION.isBotMatch && turnLeft <= 8 && !_isAnimating && !_botIsMoving) { 
                 _botIsMoving = true; setTimeout(() => { _botMove(); }, 800); 
             }
@@ -187,7 +171,6 @@ async function _processMass(row, col, color) {
     sfx.boom.play();
     if (navigator.vibrate) navigator.vibrate([40, 30, 40]);
     if (window.gsap) gsap.to(".board-wrap", { x: 5, y: 5, duration: 0.05, repeat: 5, yoyo: true });
-    
     await _explode(row, col, color); 
   } else {
     sfx.pop.play();
@@ -206,120 +189,56 @@ async function _explode(row, col, color) {
 
 function _passTurn() {
   _currentTurn = _currentTurn === 'pink' ? 'blue' : 'pink'; _dbLastMoveTime = Date.now(); _turnCount++; updateDOM();
-  
-  _lockPollingUntil = Date.now() + 2500;
+  _lockPollingUntil = Date.now() + 1500; // 🔥 CIRUGÍA: Tiempo más corto de escudo para evitar saltos en el tiempo
   
   if (window.CW_SESSION.matchId) { getSupabase().from('matches').update({ board_state: window.CW_SESSION.board, current_turn: _currentTurn, last_move_time: new Date(_dbLastMoveTime).toISOString() }).eq('id', window.CW_SESSION.matchId).then(); }
 }
 
 function _botMove() {
-  const botColor = window.CW_SESSION.myColor === 'pink' ? 'blue' : 'pink';
-  const playerColor = window.CW_SESSION.myColor;
-  const board = window.CW_SESSION.board;
-  
-  let botPieces = 0;
-  board.forEach(r => r.forEach(c => { if(c.owner === botColor) botPieces++; }));
+  const botColor = window.CW_SESSION.myColor === 'pink' ? 'blue' : 'pink'; const playerColor = window.CW_SESSION.myColor; const board = window.CW_SESSION.board;
+  let botPieces = 0; board.forEach(r => r.forEach(c => { if(c.owner === botColor) botPieces++; }));
 
   let validMoves = [];
-  for(let r=0; r<5; r++) {
-      for(let c=0; c<5; c++) {
-          if (botPieces > 0) {
-              if (board[r][c].owner === botColor) validMoves.push({r,c});
-          } else {
-              if (!board[r][c].owner) validMoves.push({r,c});
-          }
-      }
-  }
+  for(let r=0; r<5; r++) { for(let c=0; c<5; c++) { if (botPieces > 0) { if (board[r][c].owner === botColor) validMoves.push({r,c}); } else { if (!board[r][c].owner) validMoves.push({r,c}); } } }
 
-  if (validMoves.length === 0) { _botIsMoving = false; return; }
+  // 🔥 CIRUGÍA: Si el bot se queda sin movimientos, se rinde en vez de congelar la pantalla.
+  if (validMoves.length === 0) { _botIsMoving = false; _passTurn(); return; }
 
-  let bestMove = validMoves[0];
-  let maxScore = -Infinity;
-
+  let bestMove = validMoves[0]; let maxScore = -Infinity;
   for (let move of validMoves) {
-      let simBoard = JSON.parse(JSON.stringify(board));
-      _simulateAddMass(simBoard, move.r, move.c, botColor);
-      let score = _evaluateSimulatedBoard(simBoard, botColor, playerColor);
-      score += Math.random() * 0.5; 
-      
-      if (score > maxScore) {
-          maxScore = score;
-          bestMove = move;
-      }
+      let simBoard = JSON.parse(JSON.stringify(board)); _simulateAddMass(simBoard, move.r, move.c, botColor); let score = _evaluateSimulatedBoard(simBoard, botColor, playerColor); score += Math.random() * 0.5; 
+      if (score > maxScore) { maxScore = score; bestMove = move; }
   }
-  
   _addMass(bestMove.r, bestMove.c, botColor);
 }
 
-function _simulateAddMass(board, r, c, color) {
-    board[r][c].owner = color;
-    board[r][c].mass++;
-    if (board[r][c].mass >= 4) {
-        _simulateExplode(board, r, c, color);
-    }
-}
-
-function _simulateExplode(board, r, c, color) {
-    board[r][c].mass = 0;
-    board[r][c].owner = null;
-    const n = [];
-    if (r > 0) n.push({r: r - 1, c});
-    if (r < 4) n.push({r: r + 1, c});
-    if (c > 0) n.push({r, c: c - 1});
-    if (c < 4) n.push({r, c: c + 1});
-    for (const pos of n) {
-        _simulateAddMass(board, pos.r, pos.c, color);
-    }
-}
+function _simulateAddMass(board, r, c, color) { board[r][c].owner = color; board[r][c].mass++; if (board[r][c].mass >= 4) { _simulateExplode(board, r, c, color); } }
+function _simulateExplode(board, r, c, color) { board[r][c].mass = 0; board[r][c].owner = null; const n = []; if (r > 0) n.push({r: r - 1, c}); if (r < 4) n.push({r: r + 1, c}); if (c > 0) n.push({r, c: c - 1}); if (c < 4) n.push({r, c: c + 1}); for (const pos of n) { _simulateAddMass(board, pos.r, pos.c, color); } }
 
 function _evaluateSimulatedBoard(board, botColor, playerColor) {
     let score = 0;
-    for(let r=0; r<5; r++) {
-        for(let c=0; c<5; c++) {
-            const cell = board[r][c];
-            if (cell.owner === botColor) {
-                score += 10 + (cell.mass * 5);
-                if (cell.mass === 3) score += 30; 
-            } else if (cell.owner === playerColor) {
-                score -= 10 + (cell.mass * 5);
-                if (cell.mass === 3) score -= 50; 
-            }
-        }
-    }
+    for(let r=0; r<5; r++) { for(let c=0; c<5; c++) { const cell = board[r][c]; if (cell.owner === botColor) { score += 10 + (cell.mass * 5); if (cell.mass === 3) score += 30; } else if (cell.owner === playerColor) { score -= 10 + (cell.mass * 5); if (cell.mass === 3) score -= 50; } } }
     return score;
 }
 
 function _checkGameOver() {
-  let p = 0, b = 0;
-  window.CW_SESSION.board.forEach(row => row.forEach(c => { if(c.owner==='pink') p++; else if(c.owner==='blue') b++; }));
+  let p = 0, b = 0; window.CW_SESSION.board.forEach(row => row.forEach(c => { if(c.owner==='pink') p++; else if(c.owner==='blue') b++; }));
   if (_turnCount >= 2) { if (p === 0) { _finishGame('blue'); return true; } if (b === 0) { _finishGame('pink'); return true; } }
   return false;
 }
 
 function _finishGame(winnerColor, fromDB = false, reason = null) {
-  if (!_active) return; 
-  _active = false;
-  
-  clearInterval(_masterClockTimer); clearInterval(_pollTimer); 
-  
+  if (!_active) return; _active = false; clearInterval(_masterClockTimer); clearInterval(_pollTimer); 
   const win = winnerColor === window.CW_SESSION.myColor;
   
-  if (win) { 
-    sfx.win.play(); 
-    if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 400]); 
-  } else {
-    sfx.lose.play();
-    if (navigator.vibrate) navigator.vibrate([300, 200, 300]); 
-  }
+  if (win) { sfx.win.play(); if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 400]); 
+  } else { sfx.lose.play(); if (navigator.vibrate) navigator.vibrate([300, 200, 300]); }
 
   const myRealColor = window.CW_SESSION.myColor === 'pink' ? 'var(--pink)' : '#a855f7';
-  const titleColor = win ? myRealColor : '#ff4444';
-  const titleText = win ? 'VICTORIA' : 'DERROTA';
+  const titleColor = win ? myRealColor : '#ff4444'; const titleText = win ? 'VICTORIA' : 'DERROTA';
   
-  const overlay = document.createElement('div');
-  overlay.id = "cw-final-overlay";
+  const overlay = document.createElement('div'); overlay.id = "cw-final-overlay";
   overlay.style.cssText = `position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background: rgba(10, 10, 15, 0.95); z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; backdrop-filter: blur(12px); opacity: 0;`;
-  
   overlay.innerHTML = `
     <h1 id="final-title" style="color:${titleColor}; font-size:3.5rem; font-family:var(--font-display); text-transform:uppercase; margin-bottom:10px; text-shadow: 0 0 20px ${titleColor}; letter-spacing: 2px;">${titleText}</h1>
     <p style="color:#aaa; font-family:var(--font-mono); font-size:1rem; margin-bottom:40px; text-transform:uppercase; letter-spacing:1px;">${reason || (win ? '+50 CP AÑADIDOS' : 'Sigue practicando en la arena')}</p>
@@ -327,24 +246,13 @@ function _finishGame(winnerColor, fromDB = false, reason = null) {
   `;
   document.body.appendChild(overlay);
 
-  if (window.gsap) {
-    gsap.to(overlay, { opacity: 1, duration: 0.5 });
-    gsap.from("#final-title", { scale: 0.5, duration: 0.6, ease: "elastic.out(1, 0.3)" });
-  } else {
-    overlay.style.opacity = 1;
-  }
+  if (window.gsap) { gsap.to(overlay, { opacity: 1, duration: 0.5 }); gsap.from("#final-title", { scale: 0.5, duration: 0.6, ease: "elastic.out(1, 0.3)" }); } else { overlay.style.opacity = 1; }
 
   document.getElementById('btn-return-dash-final').addEventListener('click', () => {
-     const btn = document.getElementById('btn-return-dash-final');
-     btn.textContent = "SALIENDO..."; btn.disabled = true;
-     
+     const btn = document.getElementById('btn-return-dash-final'); btn.textContent = "SALIENDO..."; btn.disabled = true;
      window.sessionStorage.setItem('cw_skip_recon', '1');
-     
      if (window.CW_SESSION && window.CW_SESSION.matchId) { getSupabase().from('matches').update({ status:'finished' }).eq('id', window.CW_SESSION.matchId).then(); }
-     
-     window.CW_SESSION = null; 
-     document.body.removeChild(overlay); 
-     setView('dashboard'); 
+     window.CW_SESSION = null; document.body.removeChild(overlay); setView('dashboard'); 
   });
 
   if (!fromDB && window.CW_SESSION.matchId) { getSupabase().from('matches').update({ status:'finished', winner:winnerColor }).eq('id', window.CW_SESSION.matchId).then(); }
