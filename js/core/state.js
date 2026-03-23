@@ -173,17 +173,14 @@ export function setMatchmakingPhase(phase, countdown = 0) {
   _set('matchmaking', { phase, countdown });
 }
 
-// ── Win / Loss record ──────────────────────────────────
+// ── Win / Loss record (🛡️ CIRUGÍA: AUTORIDAD DEL SERVIDOR PARA RECOMPENSAS) ──
 export async function recordWin() {
   const sb = getSupabase();
   const id = _state.profile?.id;
   if (!id) return;
 
-  const newWins = (_state.profile.wins ?? 0) + 1;
-  const newBs   = getWalletBs() + ECONOMY.WINNER_PRIZE_BS;
-
-  await sb.from('users').update({ wins: newWins, wallet_bs: newBs }).eq('id', id);
-  _set('profile', { ..._state.profile, wins: newWins, wallet_bs: newBs });
+  await sb.rpc('cobrar_victoria', { p_user_id: id, p_premio: ECONOMY.WINNER_PRIZE_BS });
+  await reloadProfile();
 }
 
 export async function recordLoss() {
@@ -191,9 +188,8 @@ export async function recordLoss() {
   const id = _state.profile?.id;
   if (!id) return;
 
-  const newLosses = (_state.profile.losses ?? 0) + 1;
-  await sb.from('users').update({ losses: newLosses }).eq('id', id);
-  _set('profile', { ..._state.profile, losses: newLosses });
+  await sb.rpc('registrar_derrota', { p_user_id: id });
+  await reloadProfile();
 }
 
 // ── Initialization ─────────────────────────────────────
