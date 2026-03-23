@@ -459,3 +459,65 @@ button{cursor:pointer;-webkit-tap-highlight-color:transparent}
 @media(prefers-reduced-motion:reduce){
   *,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;animation-iteration-count:1!important}
 }
+
+/* ═══════════════════════════════════════════════════════
+   24. MODO CLARO (LIGHT THEME - ÉLITE CLEAN)
+   ═══════════════════════════════════════════════════════ */
+
+/* Fondos y Textos Globales */
+html.light body, html.light .bg-void { background-color: #f4f4f7 !important; color: #11111a !important; }
+html.light .text-text-base, html.light .text-bright { color: #11111a !important; text-shadow: none !important; }
+html.light .text-text-ghost { color: #777799 !important; }
+html.light .text-text-dim { color: #555577 !important; }
+
+/* Header y Barra Superior */
+html.light #app-header { background: rgba(255, 255, 255, 0.95) !important; border-bottom: 1px solid #d0d0e0 !important; }
+html.light #header-title { color: #11111a !important; text-shadow: none !important; }
+html.light #header-title span { color: #a855f7 !important; text-shadow: none !important; }
+html.light #btn-theme-toggle { border-color: #c0c0c8 !important; color: #11111a !important; }
+
+/* Tarjetas (Dashboard, Auth, Modales, Cajero) */
+html.light .card, html.light .auth-box, html.light .modal-content, 
+html.light .bank-box, html.light .calc-box, html.light .admin-card-item {
+  background: #ffffff !important; border: 1px solid #e0e0ea !important;
+  box-shadow: 0 8px 25px rgba(0,0,0,0.05) !important; color: #11111a !important;
+}
+
+/* Excepción: Tarjeta de la Billetera (Se mantiene con su gradiente pero más claro) */
+html.light .wallet-card { background: linear-gradient(145deg, #ffffff, #f4f4f7) !important; border: 1px solid #d0d0e0 !important; }
+html.light .wallet-amount { color: #11111a !important; text-shadow: none !important; }
+html.light .wallet-amount span, html.light .wallet-label { color: #a855f7 !important; text-shadow: none !important; }
+
+/* Inputs y Formularios */
+html.light .input-field { background: #f4f4f7 !important; color: #11111a !important; border-color: #d0d0e0 !important; }
+html.light .input-field:focus { border-color: #a855f7 !important; box-shadow: 0 0 0 3px rgba(168,85,247,.15) !important; }
+html.light .field-label { color: #333 !important; }
+
+/* Botones Secundarios */
+html.light .btn-ghost { border-color: #c0c0c8 !important; color: #555577 !important; }
+html.light .btn-ghost:hover { background: rgba(0,0,0,0.05) !important; color: #11111a !important; }
+html.light #btn-withdraw { border-color: #11111a !important; color: #11111a !important; }
+
+/* Tablero de Juego (La Arena) */
+html.light .board-wrap, html.light .board-grid { background: #f4f4f7 !important; border: 1px solid #c0c0c8 !important; box-shadow: 0 4px 15px rgba(0,0,0,0.05) !important; }
+html.light .cell { background: #ffffff !important; border: 1px solid #e0e0ea !important; }
+html.light #score-you, html.light #score-rival, html.light #global-timer { color: #11111a !important; text-shadow: none !important; }
+html.light #turn-indicator span { color: #11111a !important; font-weight: bold; text-shadow: none !important; }
+
+/* Ajuste de color Azul a Morado Suave en Modo Claro para mejor contraste */
+html.light .cell-blue .mass-orb { background-color: #a855f7 !important; box-shadow: 0 0 8px #a855f7 !important; }
+html.light .cell-blue { background: rgba(168,85,247,.12) !important; border-color: rgba(168,85,247,.4) !important; }
+html.light .result-lose { color: #a855f7 !important; text-shadow: none !important; }
+
+/* Pantalla de Carga y Matchmaking */
+html.light #loading-screen { background: #f4f4f7 !important; }
+html.light .loading-logo { color: #11111a !important; text-shadow: none !important; }
+html.light .mm-screen h2 { color: #11111a !important; }
+html.light .mm-countdown { background: none !important; -webkit-text-fill-color: #11111a !important; color: #11111a !important; }
+html.light .mm-ring { border-color: #c0c0c8 !important; }
+
+/* Panel Admin */
+html.light .admin-wrap h1 { color: #ffffff !important; }
+html.light .adm-table th { background: #f4f4f7 !important; color: #555577 !important; border-bottom: 1px solid #d0d0e0 !important; }
+html.light .adm-table td { color: #11111a !important; border-bottom: 1px solid #e0e0ea !important; }
+html.light .admin-card-item { background: #ffffff !important; box-shadow: 0 4px 10px rgba(0,0,0,0.03) !important; }
