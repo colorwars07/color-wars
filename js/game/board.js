@@ -8,10 +8,10 @@ let _lockPollingUntil = 0; let _opponentMissedTurns = 0;
 
 // 🔊 CONFIGURACIÓN DE SONIDOS (Usando Howler)
 const sfx = {
-  click: new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'], volume: 0.5 }),
-  pop:   new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'], volume: 0.6 }),
-  boom:  new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2579/2579-preview.mp3'], volume: 0.8 }),
-  win:   new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2019/2019-preview.mp3'], volume: 0.7 })
+  pop:   new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2688/2688-preview.mp3'], volume: 0.7 }), // Pop al presionar fichas
+  boom:  new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2579/2579-preview.mp3'], volume: 0.8 }), // La explosión que ya tenías
+  win:   new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/544/544-preview.mp3'], volume: 0.9 }),  // Aplausos de victoria
+  lose:  new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/3012/3012-preview.mp3'], volume: 0.8 }) // Trompeta triste de derrota
 };
 
 registerView('game', initGameView);
@@ -131,6 +131,8 @@ function _startMasterClock() {
         if (!_active) return clearInterval(_masterClockTimer);
         const now = Date.now();
 
+        // 🗑️ CIRUGÍA: Extirpada la regla vieja de los 40s (ahora se usan strikes AFK)
+
         let globalLeft = 180 - Math.floor((now - _dbStartTime) / 1000);
         if (globalLeft < 0) globalLeft = 0; 
         const gt = _$container.querySelector('#global-timer');
@@ -151,6 +153,7 @@ function _startMasterClock() {
         } else {
             if (turnEl) turnEl.innerHTML = `<span style="color:#aaa;">ESPERANDO RIVAL: ${Math.max(0, turnLeft)}s</span>`;
             
+            // 🛡️ CIRUGÍA: ÁRBITRO AFK (El que tiene internet castiga al desconectado)
             if (!window.CW_SESSION.isBotMatch && turnLeft <= -2 && !_isAnimating) {
                 _opponentMissedTurns++; _dbLastMoveTime = now;
                 if (_opponentMissedTurns >= 3) {
@@ -173,13 +176,13 @@ function handlePlayerClick(row, col) {
   if (myPieces > 0 && cell.owner !== myColor) { showToast("Solo puedes presionar tus fichas", "warning"); return; }
   if (cell.owner && cell.owner !== myColor) return;
 
-  // ⚡ FEEDBACK: Sonido + Vibración + Salto GSAP
-  sfx.click.play();
+  // ⚡ FEEDBACK: Sonido Pop + Vibración + Animación GSAP
+  sfx.pop.play();
   if (navigator.vibrate) navigator.vibrate(15);
   const domCell = _$container.querySelector(`[data-r="${row}"][data-c="${col}"]`);
-  gsap.from(domCell, { scale: 0.8, duration: 0.12, ease: "back.out(2)" });
+  if (domCell && window.gsap) gsap.from(domCell, { scale: 0.8, duration: 0.12, ease: "back.out(2)" });
 
-  _missedTurns = 0; _addMass(row, col, myColor); 
+  _missedTurns = 0; _addMass(row, col, myColor); // Resetea tus strikes si tocas una ficha
 }
 
 async function _addMass(row, col, color) {
@@ -190,19 +193,20 @@ async function _addMass(row, col, color) {
 async function _processMass(row, col, color) {
   const cell = window.CW_SESSION.board[row][col]; cell.owner = color; cell.mass++;
   
-  // ⚡ ANIMACIÓN GSAP: La ficha "salta" al crecer
+  // ⚡ ANIMACIÓN GSAP: Salto al crecer la masa
   const domCell = _$container.querySelector(`[data-r="${row}"][data-c="${col}"]`);
-  gsap.to(domCell.querySelector('.cell-mass'), { scale: 1.25, duration: 0.08, yoyo: true, repeat: 1 });
+  if (domCell && window.gsap) gsap.to(domCell.querySelector('.cell-mass'), { scale: 1.25, duration: 0.08, yoyo: true, repeat: 1 });
 
   if (cell.mass >= 4) {
-    // 💥 EXPLOSIÓN: Sonido duro + Vibración fuerte + Sacudida de pantalla
+    // 💥 EXPLOSIÓN Y SACUDIDA
     sfx.boom.play();
     if (navigator.vibrate) navigator.vibrate([40, 30, 40]);
-    gsap.to(".board-wrap", { x: 5, y: 5, duration: 0.05, repeat: 5, yoyo: true });
+    if (window.gsap) gsap.to(".board-wrap", { x: 5, y: 5, duration: 0.05, repeat: 5, yoyo: true });
     
     await _explode(row, col, color); 
   } else {
-    sfx.pop.play(); // Sonido suave de toque
+    // Sonido pop en las reacciones en cadena
+    sfx.pop.play();
     updateDOM();
   }
 }
@@ -212,13 +216,14 @@ async function _explode(row, col, color) {
   const n = [];
   if (row > 0) n.push({row: row - 1, col}); if (row < 4) n.push({row: row + 1, col});
   if (col > 0) n.push({row, col: col - 1}); if (col < 4) n.push({row, col: col + 1});
-  await new Promise(r => setTimeout(r, 180));
+  await new Promise(r => setTimeout(r, 200));
   for (const pos of n) await _processMass(pos.row, pos.col, color);
 }
 
 function _passTurn() {
   _currentTurn = _currentTurn === 'pink' ? 'blue' : 'pink'; _dbLastMoveTime = Date.now(); _turnCount++; updateDOM();
   
+  // 🔒 CIRUGÍA: CERRAMOS EL CANDADO (No escuchar a Supabase por 2.5s al pasar turno)
   _lockPollingUntil = Date.now() + 2500;
   
   if (window.CW_SESSION.matchId) { getSupabase().from('matches').update({ board_state: window.CW_SESSION.board, current_turn: _currentTurn, last_move_time: new Date(_dbLastMoveTime).toISOString() }).eq('id', window.CW_SESSION.matchId).then(); }
@@ -316,8 +321,14 @@ function _finishGame(winnerColor, fromDB = false, reason = null) {
   
   const win = winnerColor === window.CW_SESSION.myColor;
   
-  // ⚡ FEEDBACK FINAL: Sonido Victoria + Vibración Épica
-  if (win) { sfx.win.play(); if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 400]); }
+  // ⚡ FEEDBACK FINAL: Victoria o Derrota
+  if (win) { 
+    sfx.win.play(); 
+    if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 400]); 
+  } else {
+    sfx.lose.play();
+    if (navigator.vibrate) navigator.vibrate([300, 200, 300]); 
+  }
 
   const myRealColor = window.CW_SESSION.myColor === 'pink' ? 'var(--pink)' : '#a855f7';
   const titleColor = win ? myRealColor : '#ff4444';
@@ -334,16 +345,25 @@ function _finishGame(winnerColor, fromDB = false, reason = null) {
   `;
   document.body.appendChild(overlay);
 
-  // ⚡ ANIMACIÓN GSAP: El cartel entra suavemente
-  gsap.to(overlay, { opacity: 1, duration: 0.5 });
-  gsap.from("#final-title", { scale: 0.5, duration: 0.6, ease: "elastic.out(1, 0.3)" });
+  // ⚡ ANIMACIÓN GSAP
+  if (window.gsap) {
+    gsap.to(overlay, { opacity: 1, duration: 0.5 });
+    gsap.from("#final-title", { scale: 0.5, duration: 0.6, ease: "elastic.out(1, 0.3)" });
+  } else {
+    overlay.style.opacity = 1;
+  }
 
   document.getElementById('btn-return-dash-final').addEventListener('click', () => {
      const btn = document.getElementById('btn-return-dash-final');
      btn.textContent = "SALIENDO..."; btn.disabled = true;
+     
      window.sessionStorage.setItem('cw_skip_recon', '1');
+     
      if (window.CW_SESSION && window.CW_SESSION.matchId) { getSupabase().from('matches').update({ status:'finished' }).eq('id', window.CW_SESSION.matchId).then(); }
-     window.CW_SESSION = null; document.body.removeChild(overlay); setView('dashboard'); 
+     
+     window.CW_SESSION = null; 
+     document.body.removeChild(overlay); 
+     setView('dashboard'); 
   });
 
   if (!fromDB && window.CW_SESSION.matchId) { getSupabase().from('matches').update({ status:'finished', winner:winnerColor }).eq('id', window.CW_SESSION.matchId).then(); }
