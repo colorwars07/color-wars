@@ -2,7 +2,7 @@ import { registerView, showToast, escHtml } from '../core/app.js';
 import { setView } from '../core/state.js';
 import { getSupabase } from '../core/supabase.js';
 
-const BOARD_SIZE = 5; let _active = false; let _currentTurn = 'pink'; let _isAnimating = false; let _turnCount = 0; let _missedTurns = 0; let _$container = null; let _masterClockTimer = null; let _pollTimer = null; let _dbStartTime = null; let _dbLastMoveTime = null; let _lastDBUpdateTime = null; let _botIsMoving = false;
+const BOARD_SIZE = 5; let _active = false; let _currentTurn = 'pink'; let _isAnimating = false; let _turnCount = 0; let _missedTurns = 0; let _$container = null; let _masterClockTimer = null; let _matchChannel = null; let _dbStartTime = null; let _dbLastMoveTime = null; let _lastDBUpdateTime = null; let _botIsMoving = false;
 let _lockPollingUntil = 0; let _opponentMissedTurns = 0; let _processingStrike = false;
 
 // 🔊 CONFIGURACIÓN DE SONIDOS (Limpios)
@@ -31,28 +31,31 @@ export async function initGameView($container) {
         window.CW_SESSION.board = matchData.board_state || window.CW_SESSION.board; _currentTurn = matchData.current_turn || 'pink'; _dbStartTime = matchData.match_start_time ? new Date(matchData.match_start_time).getTime() : Date.now(); _dbLastMoveTime = Date.now();
       }
     } catch(e) {}
-    if (!window.CW_SESSION.isBotMatch) _startPolling();
+    
+    // 🛡️ CIRUGÍA: Iniciamos la conexión Realtime en vez de Polling
+    if (!window.CW_SESSION.isBotMatch) _startRealtimeSubscription();
   }
   renderHTML(); updateDOM(); _startMasterClock();
 }
 
-function _startPolling() {
-  clearInterval(_pollTimer);
-  _pollTimer = setInterval(async () => {
-    if (!_active || _isAnimating) return; // 🔥 LÓGICA: Evita leer si hay explosión
-    try {
-      const { data } = await getSupabase().from('matches').select('board_state, current_turn, last_move_time, status, winner').eq('id', window.CW_SESSION.matchId).single();
-      if (data) {
-        _lastDBUpdateTime = Date.now(); 
-        if (data.status === 'finished' && data.winner) { _finishGame(data.winner, true); return; }
-        if (Date.now() > _lockPollingUntil) {
-            if (data.current_turn === window.CW_SESSION.myColor && _currentTurn !== window.CW_SESSION.myColor) {
-               window.CW_SESSION.board = data.board_state; _currentTurn = data.current_turn; _dbLastMoveTime = new Date(data.last_move_time).getTime(); _missedTurns = 0; _opponentMissedTurns = 0; updateDOM();
-            }
-        }
+function _startRealtimeSubscription() {
+  const sb = getSupabase();
+  if (_matchChannel) { sb.removeChannel(_matchChannel); _matchChannel = null; }
+  
+  // 🔥 LÓGICA: Supabase Realtime (WebSockets) elimina las 66 peticiones por segundo
+  _matchChannel = sb.channel(`match_${window.CW_SESSION.matchId}`)
+    .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'matches', filter: `id=eq.${window.CW_SESSION.matchId}` }, (payload) => {
+      if (!_active || _isAnimating) return; 
+      const data = payload.new;
+      _lastDBUpdateTime = Date.now(); 
+      if (data.status === 'finished' && data.winner) { _finishGame(data.winner, true); return; }
+      
+      if (Date.now() > _lockPollingUntil) {
+          if (data.current_turn === window.CW_SESSION.myColor && _currentTurn !== window.CW_SESSION.myColor) {
+             window.CW_SESSION.board = data.board_state; _currentTurn = data.current_turn; _dbLastMoveTime = new Date(data.last_move_time).getTime(); _missedTurns = 0; _opponentMissedTurns = 0; updateDOM();
+          }
       }
-    } catch(e) {}
-  }, 1500);
+    }).subscribe();
 }
 
 function renderHTML() {
@@ -60,7 +63,7 @@ function renderHTML() {
   const youColorVar = myColor === 'pink' ? 'var(--pink)' : '#a855f7'; 
   const rivalColorVar = myColor === 'pink' ? '#a855f7' : 'var(--pink)';
   
-  // 🎨 ESTÉTICA ORIGINAL INTACTA (Sin el bloque <style> que forzaba el modo claro)
+  // 🎨 ESTÉTICA ORIGINAL INTACTA
   _$container.innerHTML = `
   <div class="game-arena">
     <div style="background: rgba(10, 10, 15, 0.9); border: 1px solid var(--border-ghost); border-radius: 14px; padding: 12px; margin-bottom: 20px; width: 95%; max-width: 380px; display: flex; flex-direction: column; gap: 8px;">
@@ -121,7 +124,6 @@ function _startMasterClock() {
         if (isMyTurn) {
             if (turnEl) turnEl.innerHTML = `<span style="color:var(--pink);">TU TURNO: ${Math.max(0, turnLeft)}s</span>`;
             
-            // 🔥 LÓGICA: Blindaje contra lag para strikes
             if (turnLeft <= 0 && !_isAnimating && !_processingStrike) {
                 _processingStrike = true; _missedTurns++; _dbLastMoveTime = now;
                 if (_missedTurns >= 3) { _finishGame(window.CW_SESSION.myColor==='pink'?'blue':'pink', false, "ELIMINADO POR INACTIVIDAD (3/3)"); } 
@@ -203,7 +205,6 @@ function _botMove() {
   let validMoves = [];
   for(let r=0; r<5; r++) { for(let c=0; c<5; c++) { if (botPieces > 0) { if (board[r][c].owner === botColor) validMoves.push({r,c}); } else { if (!board[r][c].owner) validMoves.push({r,c}); } } }
 
-  // 🔥 LÓGICA: El bot se rinde si no tiene movimientos en lugar de congelar
   if (validMoves.length === 0) { _botIsMoving = false; _passTurn(); return; }
 
   let bestMove = validMoves[0]; let maxScore = -Infinity;
@@ -230,7 +231,9 @@ function _checkGameOver() {
 }
 
 function _finishGame(winnerColor, fromDB = false, reason = null) {
-  if (!_active) return; _active = false; clearInterval(_masterClockTimer); clearInterval(_pollTimer); 
+  if (!_active) return; _active = false; clearInterval(_masterClockTimer); 
+  if (_matchChannel) { getSupabase().removeChannel(_matchChannel); _matchChannel = null; }
+  
   const win = winnerColor === window.CW_SESSION.myColor;
   
   if (win) { sfx.win.play(); if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 400]); 
