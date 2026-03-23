@@ -5,12 +5,12 @@ import { getSupabase } from '../core/supabase.js';
 const BOARD_SIZE = 5; let _active = false; let _currentTurn = 'pink'; let _isAnimating = false; let _turnCount = 0; let _missedTurns = 0; let _$container = null; let _masterClockTimer = null; let _pollTimer = null; let _dbStartTime = null; let _dbLastMoveTime = null; let _lastDBUpdateTime = null; let _botIsMoving = false;
 let _lockPollingUntil = 0; let _opponentMissedTurns = 0; let _processingStrike = false;
 
-// 🔊 CONFIGURACIÓN DE SONIDOS 
+// 🔊 CONFIGURACIÓN DE SONIDOS (Limpios)
 const sfx = {
   click: new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'], volume: 0.5 }), 
   pop:   new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'], volume: 0.7 }), 
   boom:  new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'], volume: 1.0 }), 
-  win:   new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/544/544-preview.mp3'], volume: 0.9 }),  
+  win:   new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/544/544-preview.mp3'], volume: 1.0 }),  // 🔥 VICTORIA AL MÁXIMO
   lose:  new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/3012/3012-preview.mp3'], volume: 0.8 }) 
 };
 
@@ -39,7 +39,7 @@ export async function initGameView($container) {
 function _startPolling() {
   clearInterval(_pollTimer);
   _pollTimer = setInterval(async () => {
-    if (!_active || _isAnimating) return; // 🔥 Evita la lectura si hay explosión activa
+    if (!_active || _isAnimating) return; // 🔥 LÓGICA: Evita leer si hay explosión
     try {
       const { data } = await getSupabase().from('matches').select('board_state, current_turn, last_move_time, status, winner').eq('id', window.CW_SESSION.matchId).single();
       if (data) {
@@ -60,6 +60,7 @@ function renderHTML() {
   const youColorVar = myColor === 'pink' ? 'var(--pink)' : '#a855f7'; 
   const rivalColorVar = myColor === 'pink' ? '#a855f7' : 'var(--pink)';
   
+  // 🎨 ESTÉTICA ORIGINAL INTACTA (Sin el bloque <style> que forzaba el modo claro)
   _$container.innerHTML = `
   <div class="game-arena">
     <div style="background: rgba(10, 10, 15, 0.9); border: 1px solid var(--border-ghost); border-radius: 14px; padding: 12px; margin-bottom: 20px; width: 95%; max-width: 380px; display: flex; flex-direction: column; gap: 8px;">
@@ -120,7 +121,7 @@ function _startMasterClock() {
         if (isMyTurn) {
             if (turnEl) turnEl.innerHTML = `<span style="color:var(--pink);">TU TURNO: ${Math.max(0, turnLeft)}s</span>`;
             
-            // 🔥 CIRUGÍA: Blindaje contra lag para que no de strikes injustos seguidos
+            // 🔥 LÓGICA: Blindaje contra lag para strikes
             if (turnLeft <= 0 && !_isAnimating && !_processingStrike) {
                 _processingStrike = true; _missedTurns++; _dbLastMoveTime = now;
                 if (_missedTurns >= 3) { _finishGame(window.CW_SESSION.myColor==='pink'?'blue':'pink', false, "ELIMINADO POR INACTIVIDAD (3/3)"); } 
@@ -171,6 +172,7 @@ async function _processMass(row, col, color) {
     sfx.boom.play();
     if (navigator.vibrate) navigator.vibrate([40, 30, 40]);
     if (window.gsap) gsap.to(".board-wrap", { x: 5, y: 5, duration: 0.05, repeat: 5, yoyo: true });
+    
     await _explode(row, col, color); 
   } else {
     sfx.pop.play();
@@ -189,7 +191,7 @@ async function _explode(row, col, color) {
 
 function _passTurn() {
   _currentTurn = _currentTurn === 'pink' ? 'blue' : 'pink'; _dbLastMoveTime = Date.now(); _turnCount++; updateDOM();
-  _lockPollingUntil = Date.now() + 1500; // 🔥 CIRUGÍA: Tiempo más corto de escudo para evitar saltos en el tiempo
+  _lockPollingUntil = Date.now() + 1500; 
   
   if (window.CW_SESSION.matchId) { getSupabase().from('matches').update({ board_state: window.CW_SESSION.board, current_turn: _currentTurn, last_move_time: new Date(_dbLastMoveTime).toISOString() }).eq('id', window.CW_SESSION.matchId).then(); }
 }
@@ -201,7 +203,7 @@ function _botMove() {
   let validMoves = [];
   for(let r=0; r<5; r++) { for(let c=0; c<5; c++) { if (botPieces > 0) { if (board[r][c].owner === botColor) validMoves.push({r,c}); } else { if (!board[r][c].owner) validMoves.push({r,c}); } } }
 
-  // 🔥 CIRUGÍA: Si el bot se queda sin movimientos, se rinde en vez de congelar la pantalla.
+  // 🔥 LÓGICA: El bot se rinde si no tiene movimientos en lugar de congelar
   if (validMoves.length === 0) { _botIsMoving = false; _passTurn(); return; }
 
   let bestMove = validMoves[0]; let maxScore = -Infinity;
