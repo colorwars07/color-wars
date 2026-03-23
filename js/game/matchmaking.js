@@ -9,7 +9,6 @@ const ENTRY_FEE = 30; const SEARCH_TIMEOUT_MS = 20000;
 const VZLA_NAMES = ["Maikol", "El Bryan", "La Catira", "Yuridia", "El Gocho", "La Chama", "Yuleisi", "El Chino", "Juancho", "Dayana", "El Portugués", "El Convive", "Yordano", "Cristian"];
 
 export async function initMatchmaking($container) {
-  // 🚛 CIRUGÍA: CAMIÓN DE BASURA (Limpieza absoluta de memoria al entrar)
   clearTimeout(_searchTimer); clearInterval(_countdownTimer); clearInterval(_pollTimer); 
   _searchTimer = null; _countdownTimer = null; _pollTimer = null; _currentMatchId = null;
   window.CW_SESSION = null; 
@@ -40,13 +39,10 @@ function renderSearchScreen($c) {
       const $btn = document.getElementById('btn-cancel-search');
       if($btn) { $btn.textContent = "CANCELANDO..."; $btn.disabled = true; }
       
-      // 🚛 CIRUGÍA: CAMIÓN DE BASURA (Limpieza absoluta al salir)
       clearTimeout(_searchTimer); clearInterval(_countdownTimer); clearInterval(_pollTimer); 
       _searchTimer = null; _countdownTimer = null; _pollTimer = null;
       
-      // 🛡️ ESCUDO ANTI-RECONEXIÓN ACTIVADO
       window.sessionStorage.setItem('cw_skip_recon', '1');
-      
       if (_currentMatchId) { getSupabase().from('matches').update({ status: 'cancelled' }).eq('id', _currentMatchId).then(); }
       _currentMatchId = null; window.CW_SESSION = null;
       setView('dashboard'); 
@@ -64,15 +60,32 @@ async function payEntryFee() {
 async function startSearch($c, profile) {
   const sb = getSupabase();
   try {
-    const { data: waitingMatch } = await sb.from('matches').select('*').eq('status', 'waiting').neq('player_pink', profile.id).limit(1).maybeSingle();
-    if (waitingMatch) {
-      const { data: joinedMatch } = await sb.from('matches').update({ player_blue: profile.id, status: 'playing', match_start_time: new Date().toISOString(), last_move_time: new Date().toISOString() }).eq('id', waitingMatch.id).select().single();
+    const { data: waitingMatch, error: findErr } = await sb.from('matches').select('*').eq('status', 'waiting').neq('player_pink', profile.id).limit(1).maybeSingle();
+    
+    // 🔥 CIRUGÍA: Verificamos si pudimos unirnos sin error de seguridad (RLS)
+    if (waitingMatch && !findErr) {
+      const { data: joinedMatch, error: joinErr } = await sb.from('matches').update({ player_blue: profile.id, status: 'playing', match_start_time: new Date().toISOString(), last_move_time: new Date().toISOString() }).eq('id', waitingMatch.id).select().single();
+      
+      if (joinErr || !joinedMatch) throw new Error("Fallo de unión segura"); // Forzamos ir al catch para crear sala propia
+        
       await payEntryFee();
       const { data: oppData } = await sb.from('users').select('username').eq('id', waitingMatch.player_pink).single();
       window.CW_SESSION = { isBotMatch: false, matchId: joinedMatch.id, myColor: 'blue', rivalName: oppData?.username || "Jugador", board: Array(5).fill(null).map(() => Array(5).fill(null).map(() => ({ owner: null, mass: 0 }))) };
       renderCountdownScreen($c, profile.username, window.CW_SESSION.rivalName, "Juegas de segundo (AZUL)"); startCountdown($c);
     } else {
-      const { data: newMatch } = await sb.from('matches').insert([{ player_pink: profile.id, status: 'waiting' }]).select().single();
+      await createOwnRoom($c, profile, sb);
+    }
+  } catch (err) { 
+    // 🔥 CIRUGÍA: Si falla al unirse, NO abortamos, creamos sala propia o jugamos contra Bot.
+    await createOwnRoom($c, profile, sb); 
+  }
+}
+
+async function createOwnRoom($c, profile, sb) {
+  try {
+      const { data: newMatch, error: createErr } = await sb.from('matches').insert([{ player_pink: profile.id, status: 'waiting' }]).select().single();
+      if (createErr || !newMatch) throw new Error("Error db");
+      
       _currentMatchId = newMatch.id;
       _pollTimer = setInterval(async () => {
         try {
@@ -84,10 +97,14 @@ async function startSearch($c, profile) {
             renderCountdownScreen($c, profile.username, window.CW_SESSION.rivalName, "Empiezas tú (ROSA)"); startCountdown($c);
           }
         } catch(e) {}
-      }, 1000);
+      }, 1500);
+      
       _searchTimer = setTimeout(() => { clearInterval(_pollTimer); setupBotMatchFallback($c, profile); }, SEARCH_TIMEOUT_MS); 
-    }
-  } catch (err) { window.CW_SESSION = null; setView('dashboard'); }
+  } catch(e) {
+      // Si todo falla (ej. sin internet total), volver al menú
+      clearInterval(_pollTimer); clearTimeout(_searchTimer);
+      window.CW_SESSION = null; setView('dashboard'); showToast('Error de servidor. Intenta de nuevo.', 'error');
+  }
 }
 
 async function setupBotMatchFallback($c, profile) {
@@ -95,7 +112,7 @@ async function setupBotMatchFallback($c, profile) {
   try {
     if(_currentMatchId) {
         const {data: checkMatch} = await sb.from('matches').select('status').eq('id', _currentMatchId).single();
-        if(!checkMatch || checkMatch.status === 'cancelled') return; 
+        if(!checkMatch || checkMatch.status === 'cancelled') return; // Canceló manualmente
     }
     const isUserPink = Math.random() > 0.5; const randomName = VZLA_NAMES[Math.floor(Math.random() * VZLA_NAMES.length)]; const startTime = new Date().toISOString();
     if (_currentMatchId) { await sb.from('matches').update({ player_pink: isUserPink ? profile.id : 'BOT', player_blue: isUserPink ? 'BOT' : profile.id, status: 'playing', match_start_time: startTime, last_move_time: startTime }).eq('id', _currentMatchId); } 
