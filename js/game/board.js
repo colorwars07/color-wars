@@ -3,15 +3,15 @@ import { setView } from '../core/state.js';
 import { getSupabase } from '../core/supabase.js';
 
 const BOARD_SIZE = 5; let _active = false; let _currentTurn = 'pink'; let _isAnimating = false; let _turnCount = 0; let _missedTurns = 0; let _$container = null; let _masterClockTimer = null; let _pollTimer = null; let _dbStartTime = null; let _dbLastMoveTime = null; let _lastDBUpdateTime = null; let _botIsMoving = false;
-// 🔒 CIRUGÍA: Variables del candado y strikes del rival
 let _lockPollingUntil = 0; let _opponentMissedTurns = 0;
 
-// 🔊 CONFIGURACIÓN DE SONIDOS (Usando Howler)
+// 🔊 CONFIGURACIÓN DE SONIDOS (Limpios, sin mierdas galácticas)
 const sfx = {
-  pop:   new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2688/2688-preview.mp3'], volume: 0.7 }), // Pop al presionar fichas
-  boom:  new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2579/2579-preview.mp3'], volume: 0.8 }), // La explosión que ya tenías
-  win:   new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/544/544-preview.mp3'], volume: 0.9 }),  // Aplausos de victoria
-  lose:  new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/3012/3012-preview.mp3'], volume: 0.8 }) // Trompeta triste de derrota
+  click: new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2571/2571-preview.mp3'], volume: 0.5 }), // El click original suave
+  pop:   new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'], volume: 0.7 }), // El pop original
+  boom:  new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/2578/2578-preview.mp3'], volume: 1.0 }), // Usamos el pop fuerte para explotar, cero láseres
+  win:   new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/544/544-preview.mp3'], volume: 0.9 }),  // TUS Aplausos
+  lose:  new Howl({ src: ['https://assets.mixkit.co/active_storage/sfx/3012/3012-preview.mp3'], volume: 0.8 }) // TU trompeta de derrota
 };
 
 registerView('game', initGameView);
@@ -20,7 +20,7 @@ export async function initGameView($container) {
   _$container = $container;
   if (!window.CW_SESSION || !window.CW_SESSION.board) { window.CW_SESSION = null; setView('dashboard'); return; }
   _active = true; _isAnimating = false; _turnCount = 0; _missedTurns = 0; _botIsMoving = false; _lastDBUpdateTime = Date.now();
-  _lockPollingUntil = 0; _opponentMissedTurns = 0; // Reiniciamos candados y strikes
+  _lockPollingUntil = 0; _opponentMissedTurns = 0;
   const sb = getSupabase();
 
   if (window.CW_SESSION.matchId) {
@@ -45,8 +45,6 @@ function _startPolling() {
       if (data) {
         _lastDBUpdateTime = Date.now(); 
         if (data.status === 'finished' && data.winner) { _finishGame(data.winner, true); return; }
-        
-        // 🔒 CIRUGÍA: Candado anti-viajes en el tiempo (Prohibido leer si acabo de mover)
         if (Date.now() > _lockPollingUntil) {
             if (data.current_turn === window.CW_SESSION.myColor && _currentTurn !== window.CW_SESSION.myColor) {
                window.CW_SESSION.board = data.board_state; _currentTurn = data.current_turn; _dbLastMoveTime = new Date(data.last_move_time).getTime(); _missedTurns = 0; _opponentMissedTurns = 0; updateDOM();
@@ -59,26 +57,19 @@ function _startPolling() {
 
 function renderHTML() {
   const myColor = window.CW_SESSION.myColor; const rivalName = window.CW_SESSION.rivalName || window.CW_SESSION.botName || 'RIVAL'; 
-  
-  // 🔥 CIRUGÍA VISUAL: Reemplazamos el 'blue' por Morado Suave (#a855f7)
   const youColorVar = myColor === 'pink' ? 'var(--pink)' : '#a855f7'; 
   const rivalColorVar = myColor === 'pink' ? '#a855f7' : 'var(--pink)';
   
   _$container.innerHTML = `
   <style>
-    /* 🔥 FORZAR MORADO SUAVE EN LAS FICHAS AZULES (Aplica en ambos modos) */
     .cell-blue .mass-orb { background-color: #a855f7 !important; box-shadow: 0 0 8px #a855f7 !important; }
-    
-    /* 🌓 SOBREESCRITURAS DEL MODO CLARO ÉLITE (Solo se activa con la clase html.light) */
     html.light .game-arena > div:first-child { background: #ffffff !important; border: 1px solid #e0e0ea !important; box-shadow: 0 8px 25px rgba(0,0,0,0.05) !important; }
     html.light .game-arena span { color: #11111a !important; text-shadow: none !important; }
-    html.light #global-timer { color: #ffaa00 !important; } /* Preservamos el naranja del reloj */
+    html.light #global-timer { color: #ffaa00 !important; }
     html.light #score-you, html.light #score-rival { color: #11111a !important; }
     html.light .board-wrap, html.light #grid { background: #f4f4f7 !important; border: 1px solid #c0c0c8 !important; box-shadow: 0 4px 15px rgba(0,0,0,0.05) !important; }
     html.light .cell { background: #ffffff !important; border: 1px solid #e0e0ea !important; }
     html.light #btn-surrender { border-color: #11111a !important; color: #11111a !important; }
-    
-    /* Efecto de pulso suave para las fichas */
     .cell-mass { transition: transform 0.15s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
   </style>
   <div class="game-arena">
@@ -131,8 +122,6 @@ function _startMasterClock() {
         if (!_active) return clearInterval(_masterClockTimer);
         const now = Date.now();
 
-        // 🗑️ CIRUGÍA: Extirpada la regla vieja de los 40s (ahora se usan strikes AFK)
-
         let globalLeft = 180 - Math.floor((now - _dbStartTime) / 1000);
         if (globalLeft < 0) globalLeft = 0; 
         const gt = _$container.querySelector('#global-timer');
@@ -153,7 +142,6 @@ function _startMasterClock() {
         } else {
             if (turnEl) turnEl.innerHTML = `<span style="color:#aaa;">ESPERANDO RIVAL: ${Math.max(0, turnLeft)}s</span>`;
             
-            // 🛡️ CIRUGÍA: ÁRBITRO AFK (El que tiene internet castiga al desconectado)
             if (!window.CW_SESSION.isBotMatch && turnLeft <= -2 && !_isAnimating) {
                 _opponentMissedTurns++; _dbLastMoveTime = now;
                 if (_opponentMissedTurns >= 3) {
@@ -176,13 +164,12 @@ function handlePlayerClick(row, col) {
   if (myPieces > 0 && cell.owner !== myColor) { showToast("Solo puedes presionar tus fichas", "warning"); return; }
   if (cell.owner && cell.owner !== myColor) return;
 
-  // ⚡ FEEDBACK: Sonido Pop + Vibración + Animación GSAP
-  sfx.pop.play();
+  sfx.click.play();
   if (navigator.vibrate) navigator.vibrate(15);
   const domCell = _$container.querySelector(`[data-r="${row}"][data-c="${col}"]`);
   if (domCell && window.gsap) gsap.from(domCell, { scale: 0.8, duration: 0.12, ease: "back.out(2)" });
 
-  _missedTurns = 0; _addMass(row, col, myColor); // Resetea tus strikes si tocas una ficha
+  _missedTurns = 0; _addMass(row, col, myColor); 
 }
 
 async function _addMass(row, col, color) {
@@ -193,19 +180,16 @@ async function _addMass(row, col, color) {
 async function _processMass(row, col, color) {
   const cell = window.CW_SESSION.board[row][col]; cell.owner = color; cell.mass++;
   
-  // ⚡ ANIMACIÓN GSAP: Salto al crecer la masa
   const domCell = _$container.querySelector(`[data-r="${row}"][data-c="${col}"]`);
   if (domCell && window.gsap) gsap.to(domCell.querySelector('.cell-mass'), { scale: 1.25, duration: 0.08, yoyo: true, repeat: 1 });
 
   if (cell.mass >= 4) {
-    // 💥 EXPLOSIÓN Y SACUDIDA
     sfx.boom.play();
     if (navigator.vibrate) navigator.vibrate([40, 30, 40]);
     if (window.gsap) gsap.to(".board-wrap", { x: 5, y: 5, duration: 0.05, repeat: 5, yoyo: true });
     
     await _explode(row, col, color); 
   } else {
-    // Sonido pop en las reacciones en cadena
     sfx.pop.play();
     updateDOM();
   }
@@ -223,7 +207,6 @@ async function _explode(row, col, color) {
 function _passTurn() {
   _currentTurn = _currentTurn === 'pink' ? 'blue' : 'pink'; _dbLastMoveTime = Date.now(); _turnCount++; updateDOM();
   
-  // 🔒 CIRUGÍA: CERRAMOS EL CANDADO (No escuchar a Supabase por 2.5s al pasar turno)
   _lockPollingUntil = Date.now() + 2500;
   
   if (window.CW_SESSION.matchId) { getSupabase().from('matches').update({ board_state: window.CW_SESSION.board, current_turn: _currentTurn, last_move_time: new Date(_dbLastMoveTime).toISOString() }).eq('id', window.CW_SESSION.matchId).then(); }
@@ -321,7 +304,6 @@ function _finishGame(winnerColor, fromDB = false, reason = null) {
   
   const win = winnerColor === window.CW_SESSION.myColor;
   
-  // ⚡ FEEDBACK FINAL: Victoria o Derrota
   if (win) { 
     sfx.win.play(); 
     if (navigator.vibrate) navigator.vibrate([100, 50, 100, 50, 400]); 
@@ -345,7 +327,6 @@ function _finishGame(winnerColor, fromDB = false, reason = null) {
   `;
   document.body.appendChild(overlay);
 
-  // ⚡ ANIMACIÓN GSAP
   if (window.gsap) {
     gsap.to(overlay, { opacity: 1, duration: 0.5 });
     gsap.from("#final-title", { scale: 0.5, duration: 0.6, ease: "elastic.out(1, 0.3)" });
